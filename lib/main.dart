@@ -101,7 +101,7 @@ List<AiProvider> defaultProviders() => [
         name: 'Google Gemini (مجاني)',
         url:
             'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-        model: 'gemini-2.5-flash',
+        model: 'gemini-flash-latest',
         builtIn: true,
         hint: 'مفتاح مجاني من: aistudio.google.com',
       ),
@@ -128,6 +128,38 @@ List<AiProvider> defaultProviders() => [
         model: 'mistral-small-latest',
         builtIn: true,
         hint: 'مفتاح من: console.mistral.ai',
+      ),
+      AiProvider(
+        id: 'xai',
+        name: 'xAI Grok',
+        url: 'https://api.x.ai/v1/chat/completions',
+        model: 'grok-4',
+        builtIn: true,
+        hint: 'مفتاح من: console.x.ai — اضغط جلب النماذج لاختيار اسم صحيح.',
+      ),
+      AiProvider(
+        id: 'huggingface',
+        name: 'Hugging Face (رصيد مجاني)',
+        url: 'https://router.huggingface.co/v1/chat/completions',
+        model: 'meta-llama/Llama-3.3-70B-Instruct',
+        builtIn: true,
+        hint: 'مفتاح (Access Token) من: huggingface.co/settings/tokens',
+      ),
+      AiProvider(
+        id: 'nvidia',
+        name: 'NVIDIA NIM (رصيد مجاني)',
+        url: 'https://integrate.api.nvidia.com/v1/chat/completions',
+        model: 'meta/llama-3.3-70b-instruct',
+        builtIn: true,
+        hint: 'مفتاح من: build.nvidia.com',
+      ),
+      AiProvider(
+        id: 'deepseek',
+        name: 'DeepSeek',
+        url: 'https://api.deepseek.com/chat/completions',
+        model: 'deepseek-chat',
+        builtIn: true,
+        hint: 'مفتاح من: platform.deepseek.com',
       ),
       AiProvider(
         id: 'openai',
@@ -235,7 +267,107 @@ class Reply {
   Reply(this.text, this.via);
 }
 
+class ApiError implements Exception {
+  final int status;
+  final String msg;
+  ApiError(this.status, this.msg);
+  @override
+  String toString() => 'HTTP $status $msg';
+}
+
 class Gateway {
+  static String lastGood = '';
+  static final Map<String, int> _cool = {};
+
+  /// يقبل رابطاً كاملاً أو رابطاً أساسياً (مثل https://api.x.ai/v1)
+  static String chatUrl(String raw) {
+    final u = raw.trim().replaceFirst(RegExp(r'/+$'), '');
+    if (u.contains('/chat/completions')) return u;
+    if (u.contains('pollinations')) return u;
+    return '$u/chat/completions';
+  }
+
+  /// يجلب قائمة النماذج الحالية من المزود (صيغة OpenAI /models)
+  static Future<List<String>> listModels(AiProvider p) async {
+    var u = chatUrl(p.url);
+    u = u.contains('/chat/completions')
+        ? u.replaceFirst('/chat/completions', '/models')
+        : '$u/models';
+    final res = await http.get(Uri.parse(u), headers: {
+      if (p.key.trim().isNotEmpty) 'Authorization': 'Bearer ${p.key.trim()}',
+    }).timeout(const Duration(seconds: 25));
+    final body = utf8.decode(res.bodyBytes);
+    if (res.statusCode != 200) {
+      throw ApiError(res.statusCode,
+          body.length > 300 ? body.substring(0, 300) : body);
+    }
+    final j = jsonDecode(body);
+    final list = j is Map ? (j['data'] ?? j['models'] ?? []) : j;
+    final out = <String>[];
+    for (final e in (list as List)) {
+      if (e is Map) {
+        final id = (e['id'] ?? e['name'] ?? '').toString();
+        if (id.isNotEmpty) out.add(id);
+      } else if (e is String) {
+        out.add(e);
+      }
+    }
+    const bad = [
+      'embed', 'whisper', 'tts', 'audio', 'image', 'guard', 'moderation',
+      'rerank', 'imagen', 'veo', 'dall', 'speech', 'transcri', 'aqa',
+      'live', 'robotics', 'computer-use', 'vision-preview',
+    ];
+    out.removeWhere((id) => bad.any((b) => id.toLowerCase().contains(b)));
+    out.sort();
+    return out;
+  }
+
+  static String? pickModel(AiProvider p, List<String> models) {
+    if (models.isEmpty) return null;
+    var pool = models;
+    if (p.url.contains('openrouter')) {
+      final f = models.where((m) => m.endsWith(':free')).toList();
+      if (f.isNotEmpty) pool = f;
+    }
+    const order = [
+      'flash-latest', 'flash', 'llama-3.3-70b', '70b', 'llama', 'instruct',
+      'small', 'mini',
+    ];
+    for (final k in order) {
+      for (final m in pool) {
+        if (m.toLowerCase().contains(k)) return m;
+      }
+    }
+    return pool.first;
+  }
+
+  /// يستدعي المزود، وإذا كان الخطأ بسبب اسم النموذج يختار نموذجاً صالحاً تلقائياً
+  static Future<String> _callRepair(
+      AiProvider p, List<Map<String, String>> msgs) async {
+    try {
+      return await _call(p, msgs);
+    } on ApiError catch (e) {
+      final low = e.msg.toLowerCase();
+      final modelIssue = (e.status == 404) ||
+          ((e.status == 400 || e.status == 422) && low.contains('model'));
+      if (!modelIssue) rethrow;
+      if (p.needsKey && p.key.trim().isEmpty) rethrow;
+      final models = await listModels(p);
+      final pick = pickModel(p, models);
+      if (pick == null || pick == p.model) rethrow;
+      final old = p.model;
+      p.model = pick;
+      try {
+        final t = await _call(p, msgs);
+        await Store.saveProviders();
+        return t;
+      } catch (_) {
+        p.model = old;
+        rethrow;
+      }
+    }
+  }
+
   /// يجرّب المزودات الجاهزة بالترتيب، وينتقل للتالي تلقائياً عند الفشل.
   static Future<Reply> ask(List<Msg> history) async {
     final ready = Store.providers.where((p) => p.ready).toList();
@@ -248,20 +380,43 @@ class Gateway {
       {'role': 'system', 'content': kSystem},
       ...recent.map((m) => {'role': m.role, 'content': m.text}),
     ];
+    // آخر مزود نجح يُجرَّب أولاً، والمزودات الفاشلة حديثاً تُؤجَّل مؤقتاً
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final ordered = [
+      ...ready.where((p) => p.id == lastGood),
+      ...ready.where((p) => p.id != lastGood),
+    ];
+    var queue = ordered.where((p) => (_cool[p.id] ?? 0) < now).toList();
+    if (queue.isEmpty) queue = ordered;
+
     final errors = <String>[];
-    for (final p in ready) {
+    for (final p in queue) {
       try {
-        final text = await _call(p, msgs);
+        final text = await _callRepair(p, msgs);
+        lastGood = p.id;
+        _cool.remove(p.id);
         return Reply(text, p.name);
       } catch (e) {
-        errors.add('• ${p.name}: $e');
+        var s = e.toString();
+        var wait = 60000;
+        if (e is ApiError) {
+          if (e.status == 401 || e.status == 403) {
+            s = '$s\n   (المفتاح غير صحيح أو محجوب)';
+            wait = 600000;
+          } else if (e.status == 429) {
+            s = '$s\n   (تجاوزت حد الاستخدام المجاني)';
+            wait = 300000;
+          }
+        }
+        _cool[p.id] = DateTime.now().millisecondsSinceEpoch + wait;
+        errors.add('• ${p.name}: ${s.length > 220 ? s.substring(0, 220) : s}');
       }
     }
     throw 'فشلت كل المزودات:\n${errors.join('\n')}';
   }
 
   static Future<String> test(AiProvider p) async {
-    final text = await _call(p, [
+    final text = await _callRepair(p, [
       {'role': 'user', 'content': 'قل مرحباً بكلمة واحدة فقط'}
     ]);
     final t = text.trim();
@@ -272,14 +427,14 @@ class Gateway {
       AiProvider p, List<Map<String, String>> msgs) async {
     final res = await http
         .post(
-          Uri.parse(p.url.trim()),
+          Uri.parse(chatUrl(p.url)),
           headers: {
             'Content-Type': 'application/json',
             if (p.key.trim().isNotEmpty) 'Authorization': 'Bearer ${p.key.trim()}',
           },
           body: jsonEncode({'model': p.model.trim(), 'messages': msgs}),
         )
-        .timeout(const Duration(seconds: 60));
+        .timeout(const Duration(seconds: 40));
     final body = utf8.decode(res.bodyBytes);
     if (res.statusCode != 200) {
       var m = body;
@@ -288,7 +443,7 @@ class Gateway {
         final e = j['error'];
         m = (e is Map ? e['message'] : (e ?? j['message'] ?? body)).toString();
       } catch (_) {}
-      throw 'HTTP ${res.statusCode} ${m.length > 140 ? m.substring(0, 140) : m}';
+      throw ApiError(res.statusCode, m.length > 300 ? m.substring(0, 300) : m);
     }
     final j = jsonDecode(body);
     final c = j['choices']?[0]?['message']?['content'];
@@ -972,6 +1127,49 @@ class _ProviderSheetState extends State<ProviderSheet> {
         needsKey: _needsKey,
       );
 
+  Future<void> _pickModel() async {
+    final t = _temp();
+    if (t.url.isEmpty) {
+      setState(() => _result = '❌ أدخل الرابط أولاً');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _result = '';
+    });
+    try {
+      final list = await Gateway.listModels(t);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      if (list.isEmpty) {
+        setState(() => _result = '❌ لا توجد نماذج في الرد');
+        return;
+      }
+      final sel = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: kSurface,
+        builder: (c) => ListView(
+          children: [
+            for (final m in list)
+              ListTile(
+                dense: true,
+                title: Text(m, textDirection: TextDirection.ltr),
+                onTap: () => Navigator.pop(c, m),
+              ),
+          ],
+        ),
+      );
+      if (sel != null && mounted) setState(() => _model.text = sel);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _result = '❌ $e';
+        });
+      }
+    }
+  }
+
   Future<void> _test() async {
     final t = _temp();
     if (t.url.isEmpty || t.model.isEmpty) {
@@ -985,6 +1183,7 @@ class _ProviderSheetState extends State<ProviderSheet> {
     String msg;
     try {
       msg = '✅ يعمل: ${await Gateway.test(t)}';
+      _model.text = t.model;
     } catch (e) {
       msg = '❌ $e';
     }
@@ -1075,6 +1274,14 @@ class _ProviderSheetState extends State<ProviderSheet> {
               controller: _model,
               textDirection: TextDirection.ltr,
               decoration: _dec('النموذج (Model)'),
+            ),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton.icon(
+                onPressed: _busy ? null : _pickModel,
+                icon: const Icon(Icons.list_alt, size: 18),
+                label: const Text('جلب النماذج المتاحة من المزود'),
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
