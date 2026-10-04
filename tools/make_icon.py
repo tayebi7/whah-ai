@@ -9,7 +9,7 @@ os.makedirs("assets", exist_ok=True)
 def gradient(size):
     img = Image.new("RGB", (size, size))
     px = img.load()
-    c1, c2 = (124, 92, 255), (34, 211, 238)
+    c1, c2 = (59, 130, 246), (56, 189, 248)
     for y in range(size):
         for x in range(size):
             t = (x + y) / (2 * size)
@@ -31,11 +31,14 @@ def draw_w(img, scale):
     d = ImageDraw.Draw(img)
     f = font(int(S * scale))
     bb = d.textbbox((0, 0), "W", font=f)
-    d.text(((S - (bb[2] - bb[0])) / 2 - bb[0], (S - (bb[3] - bb[1])) / 2 - bb[1]),
-           "W", font=f, fill="white")
+    d.text(
+        ((S - (bb[2] - bb[0])) / 2 - bb[0], (S - (bb[3] - bb[1])) / 2 - bb[1]),
+        "W",
+        font=f,
+        fill="white",
+    )
 
 
-# أيقونة كاملة بزوايا دائرية
 bg = gradient(S).convert("RGBA")
 draw_w(bg, 0.62)
 mask = Image.new("L", (S, S), 0)
@@ -43,7 +46,6 @@ ImageDraw.Draw(mask).rounded_rectangle((0, 0, S, S), radius=int(S * 0.23), fill=
 bg.putalpha(mask)
 bg.save("assets/icon.png")
 
-# طبقة أمامية شفافة للأيقونة التكيفية
 fg = Image.new("RGBA", (S, S), (0, 0, 0, 0))
 draw_w(fg, 0.42)
 fg.save("assets/icon_fg.png")
