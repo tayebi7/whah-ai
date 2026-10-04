@@ -22,26 +22,60 @@ jobs:
           cache: true
 
       - name: Generate platform folders
-        run: flutter create --platforms=android --project-name whah_ai --org com.whah .
-
-      - name: Allow internet + cleartext HTTP
         run: |
+          flutter create --platforms=android --project-name whah_ai --org com.whah .
+
+      - name: Android config (minSdk + internet + permissions)
+        run: |
+          set -e
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          grep -q "android.permission.INTERNET" $MANIFEST || \
-            sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' $MANIFEST
-          sed -i 's#<application#<application android:usesCleartextTraffic="true"#' $MANIFEST
-          sed -i 's#android:label="[^"]*"#android:label="whah ai"#' $MANIFEST
+
+          grep -q 'android.permission.INTERNET' "$MANIFEST" || \
+            sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$MANIFEST"
+
+          grep -q 'READ_MEDIA_IMAGES' "$MANIFEST" || \
+            sed -i 's#<application#<uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>\n    <application#' "$MANIFEST"
+
+          sed -i 's#<application#<application android:usesCleartextTraffic="true"#' "$MANIFEST"
+          sed -i 's#android:label="[^"]*"#android:label="whah ai"#' "$MANIFEST"
+
+          if [ -f android/app/build.gradle ]; then
+            sed -i 's/minSdkVersion .*/minSdkVersion 24/' android/app/build.gradle || true
+            sed -i 's/minSdk .*/minSdk 24/' android/app/build.gradle || true
+          fi
+          if [ -f android/app/build.gradle.kts ]; then
+            sed -i 's/minSdk = .*/minSdk = 24/' android/app/build.gradle.kts || true
+            sed -i 's/minSdkVersion .*/minSdk = 24/' android/app/build.gradle.kts || true
+          fi
 
       - name: Generate icon
         run: |
           pip install pillow
           python tools/make_icon.py
+          ls -la assets/
 
-      - run: flutter pub get
-      - run: dart run flutter_launcher_icons
-      - run: flutter build apk --release
+      - name: Pub get
+        run: flutter pub get
 
-      - uses: actions/upload-artifact@v4
+      - name: Launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Analyze (non-fatal)
+        run: flutter analyze || true
+
+      - name: Build APK
+        run: flutter build apk --release --verbose 2>&1 | tee build_log.txt
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
         with:
           name: whah-ai-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build_log.txt
