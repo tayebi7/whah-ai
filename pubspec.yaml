@@ -1,7 +1,7 @@
 name: whah_ai
-description: whah ai - مساعد ذكي للبرمجة وأندرويد ولينكس وEnigma2
+description: whah ai - مساعد ذكي سريع بطراز Claude
 publish_to: "none"
-version: 1.0.0+1
+version: 2.0.0+1
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -9,21 +9,27 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  http: ^1.2.0
-  shared_preferences: ^2.2.3
-  flutter_markdown: ^0.7.1
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  flutter_markdown: ^0.7.4+1
+  markdown: ^7.2.2
+  file_picker: ^8.1.2
+  path_provider: ^2.1.4
+  share_plus: ^10.0.2
+  url_launcher: ^6.3.0
+  uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_launcher_icons: ^0.13.1
+  flutter_launcher_icons: ^0.14.1
   flutter_lints: ^4.0.0
 
 flutter_launcher_icons:
   android: true
   ios: false
   image_path: "assets/icon.png"
-  adaptive_icon_background: "#0B0F1E"
+  adaptive_icon_background: "#1A2332"
   adaptive_icon_foreground: "assets/icon_fg.png"
 
 flutter:
