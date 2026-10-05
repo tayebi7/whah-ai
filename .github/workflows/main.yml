@@ -22,67 +22,42 @@ jobs:
           cache: true
 
       - name: Generate platform folders
-        run: |
-          flutter create --platforms=android --project-name whah_ai --org com.whah .
+        run: flutter create --platforms=android --project-name whah_ai --org com.whah .
 
-      - name: Android config (minSdk + internet + permissions)
+      - name: Android config
         run: |
           set -e
           MANIFEST=android/app/src/main/AndroidManifest.xml
-
           grep -q 'android.permission.INTERNET' "$MANIFEST" || \
             sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$MANIFEST"
-
-          grep -q 'READ_MEDIA_IMAGES' "$MANIFEST" || \
-            sed -i 's#<application#<uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>\n    <application#' "$MANIFEST"
-
           sed -i 's#<application#<application android:usesCleartextTraffic="true"#' "$MANIFEST"
           sed -i 's#android:label="[^"]*"#android:label="whah ai"#' "$MANIFEST"
-
-          if [ -f android/app/build.gradle ]; then
-            sed -i 's/minSdkVersion .*/minSdkVersion 24/' android/app/build.gradle || true
-            sed -i 's/minSdk .*/minSdk 24/' android/app/build.gradle || true
-          fi
-          if [ -f android/app/build.gradle.kts ]; then
-            sed -i 's/minSdk = .*/minSdk = 24/' android/app/build.gradle.kts || true
-            sed -i 's/minSdkVersion .*/minSdk = 24/' android/app/build.gradle.kts || true
-          fi
+          for f in android/app/build.gradle android/app/build.gradle.kts; do
+            [ -f "$f" ] || continue
+            sed -i 's/minSdkVersion .*/minSdkVersion 21/' "$f" || true
+            sed -i 's/minSdk = .*/minSdk = 21/' "$f" || true
+            sed -i 's/minSdk .*/minSdk 21/' "$f" || true
+          done
 
       - name: Generate icon
         run: |
           pip install pillow
           python tools/make_icon.py
-          ls -la assets/
 
-      - name: Pub get
-        run: flutter pub get
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - run: flutter build apk --release
 
-      - name: Launcher icons
-        run: dart run flutter_launcher_icons
-
-      - name: Build APK
-        run: flutter build apk --release
-
-      - name: Locate APK
+      - name: Package APK
         run: |
-          echo "Searching for APK files..."
-          find build -name "*.apk" -type f 2>/dev/null || true
-          APK=$(find build -name "app-release.apk" -type f 2>/dev/null | head -1)
-          if [ -z "$APK" ]; then
-            APK=$(find build -name "*.apk" -type f 2>/dev/null | head -1)
-          fi
-          if [ -z "$APK" ]; then
-            echo "ERROR: No APK found under build/"
-            find build -type f 2>/dev/null | head -80 || true
-            exit 1
-          fi
-          echo "Found APK: $APK"
-          ls -lh "$APK"
+          find build -name "*.apk" -type f
+          APK=$(find build -name "*.apk" -type f | head -1)
+          test -n "$APK"
           mkdir -p out
           cp "$APK" out/whah-ai.apk
+          ls -lh out/whah-ai.apk
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: whah-ai-apk
           path: out/whah-ai.apk
