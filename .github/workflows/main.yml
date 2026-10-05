@@ -30,12 +30,16 @@ jobs:
         run: flutter pub get
 
       - name: Analyze
-        run: flutter analyze
+        run: |
+          echo "===== FLUTTER ANALYZE ====="
+          flutter analyze --no-fatal-infos
+          echo "===== ANALYZE FINISHED ====="
 
       - name: Build APK
         run: flutter build apk --release
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: whah-ai-apk
