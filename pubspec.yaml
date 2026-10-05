@@ -1,42 +1,42 @@
 name: whah_ai
-description: Waha AI - مساعد ذكاء اصطناعي متعدد الاستخدامات
+description: WHAH AI - مساعد ذكاء اصطناعي متعدد الاستخدامات
 publish_to: "none"
 
-version: 1.0.3+5
+version: 1.1.0+6
 
 environment:
-sdk: ">=3.3.0 <4.0.0"
+  sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
-flutter:
-sdk: flutter
+  flutter:
+    sdk: flutter
 
-flutter_localizations:
-sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
-http: ^1.2.2
-shared_preferences: ^2.3.2
-flutter_markdown: ^0.7.3
-markdown: ^7.2.2
-file_picker: ^13.1.0
-uuid: ^4.5.1
-path_provider: ^2.1.5
-url_launcher: ^6.3.1
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  flutter_markdown: ^0.7.3
+  markdown: ^7.2.2
+  file_picker: ^13.1.0
+  uuid: ^4.5.1
+  path_provider: ^2.1.5
+  url_launcher: ^6.3.1
 
 dev_dependencies:
-flutter_test:
-sdk: flutter
-flutter_launcher_icons: ^0.14.1
-flutter_lints: ^4.0.0
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: ^0.14.1
+  flutter_lints: ^4.0.0
 
 flutter_launcher_icons:
-android: true
-ios: false
-image_path: "assets/icon.png"
-adaptive_icon_background: "#60A5FA"
-adaptive_icon_foreground: "assets/icon_fg.png"
+  android: true
+  ios: false
+  image_path: "assets/icon.png"
+  adaptive_icon_background: "#60A5FA"
+  adaptive_icon_foreground: "assets/icon_fg.png"
 
 flutter:
-uses-material-design: true
-assets:
-- assets/
+  uses-material-design: true
+  assets:
+    - assets/
