@@ -1,9 +1,7 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -60,6 +58,36 @@ class WahaAI extends StatelessWidget {
 // MODELS
 // ============================================================
 
+class AttachedFile {
+  final String name;
+  final String path;
+  final int size;
+  final String extension;
+
+  const AttachedFile({
+    required this.name,
+    required this.path,
+    required this.size,
+    required this.extension,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'path': path,
+        'size': size,
+        'extension': extension,
+      };
+
+  factory AttachedFile.fromJson(Map<String, dynamic> json) {
+    return AttachedFile(
+      name: json['name']?.toString() ?? '',
+      path: json['path']?.toString() ?? '',
+      size: int.tryParse(json['size']?.toString() ?? '0') ?? 0,
+      extension: json['extension']?.toString() ?? '',
+    );
+  }
+}
+
 class ChatMessage {
   final String id;
   final String role;
@@ -76,19 +104,16 @@ class ChatMessage {
   })  : id = id ?? const Uuid().v4(),
         createdAt = createdAt ?? DateTime.now();
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'role': role,
-      'content': content,
-      'createdAt': createdAt.toIso8601String(),
-      'files': files.map((e) => e.toJson()).toList(),
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'role': role,
+        'content': content,
+        'createdAt': createdAt.toIso8601String(),
+        'files': files.map((e) => e.toJson()).toList(),
+      };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     final files = <AttachedFile>[];
-
     final rawFiles = json['files'];
 
     if (rawFiles is List) {
@@ -116,41 +141,6 @@ class ChatMessage {
   }
 }
 
-class AttachedFile {
-  final String name;
-  final String path;
-  final int size;
-  final String extension;
-
-  AttachedFile({
-    required this.name,
-    required this.path,
-    required this.size,
-    required this.extension,
-  });
-
-  Map<String, dynamic> toJson() {
-    return {
-      'name': name,
-      'path': path,
-      'size': size,
-      'extension': extension,
-    };
-  }
-
-  factory AttachedFile.fromJson(Map<String, dynamic> json) {
-    return AttachedFile(
-      name: json['name']?.toString() ?? '',
-      path: json['path']?.toString() ?? '',
-      size: int.tryParse(
-            json['size']?.toString() ?? '0',
-          ) ??
-          0,
-      extension: json['extension']?.toString() ?? '',
-    );
-  }
-}
-
 class ChatHistory {
   final String id;
   String title;
@@ -169,19 +159,16 @@ class ChatHistory {
         updatedAt = updatedAt ?? DateTime.now(),
         messages = messages ?? [];
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'title': title,
-      'createdAt': createdAt.toIso8601String(),
-      'updatedAt': updatedAt.toIso8601String(),
-      'messages': messages.map((e) => e.toJson()).toList(),
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'createdAt': createdAt.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
+        'messages': messages.map((e) => e.toJson()).toList(),
+      };
 
   factory ChatHistory.fromJson(Map<String, dynamic> json) {
     final messages = <ChatMessage>[];
-
     final rawMessages = json['messages'];
 
     if (rawMessages is List) {
@@ -232,19 +219,15 @@ class WahaSettings {
     this.rememberHistory = true,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      'provider': provider,
-      'endpoint': endpoint,
-      'apiKey': apiKey,
-      'model': model,
-      'rememberHistory': rememberHistory,
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'provider': provider,
+        'endpoint': endpoint,
+        'apiKey': apiKey,
+        'model': model,
+        'rememberHistory': rememberHistory,
+      };
 
-  factory WahaSettings.fromJson(
-    Map<String, dynamic> json,
-  ) {
+  factory WahaSettings.fromJson(Map<String, dynamic> json) {
     return WahaSettings(
       provider: json['provider']?.toString() ?? 'OpenRouter',
       endpoint: json['endpoint']?.toString() ??
@@ -259,7 +242,7 @@ class WahaSettings {
 }
 
 // ============================================================
-// LOCAL STORAGE
+// STORAGE
 // ============================================================
 
 class LocalStorage {
@@ -275,19 +258,19 @@ class LocalStorage {
     }
 
     try {
-      return WahaSettings.fromJson(
-        Map<String, dynamic>.from(
-          jsonDecode(raw) as Map,
-        ),
-      );
-    } catch (_) {
-      return WahaSettings();
-    }
+      final decoded = jsonDecode(raw);
+
+      if (decoded is Map) {
+        return WahaSettings.fromJson(
+          Map<String, dynamic>.from(decoded),
+        );
+      }
+    } catch (_) {}
+
+    return WahaSettings();
   }
 
-  static Future<void> saveSettings(
-    WahaSettings settings,
-  ) async {
+  static Future<void> saveSettings(WahaSettings settings) async {
     final prefs = await SharedPreferences.getInstance();
 
     await prefs.setString(
@@ -307,21 +290,19 @@ class LocalStorage {
     try {
       final decoded = jsonDecode(raw);
 
-      if (decoded is! List) {
-        return [];
+      if (decoded is List) {
+        return decoded
+            .whereType<Map>()
+            .map(
+              (item) => ChatHistory.fromJson(
+                Map<String, dynamic>.from(item),
+              ),
+            )
+            .toList();
       }
+    } catch (_) {}
 
-      return decoded
-          .whereType<Map>()
-          .map(
-            (item) => ChatHistory.fromJson(
-              Map<String, dynamic>.from(item),
-            ),
-          )
-          .toList();
-    } catch (_) {
-      return [];
-    }
+    return [];
   }
 
   static Future<void> saveHistory(
@@ -398,7 +379,7 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   // ==========================================================
-  // CHAT
+  // SEND
   // ==========================================================
 
   Future<void> _sendMessage() async {
@@ -410,55 +391,4 @@ class _ChatPageState extends State<ChatPage> {
       return;
     }
 
-    String content = text;
-
-    if (_pendingFiles.isNotEmpty) {
-      final names = _pendingFiles
-          .map((e) => e.name)
-          .join(', ');
-
-      if (content.isEmpty) {
-        content = 'الملفات المرفقة: $names';
-      } else {
-        content =
-            '$content\n\nالملفات المرفقة: $names';
-      }
-    }
-
-    final userMessage = ChatMessage(
-      role: 'user',
-      content: content,
-      files: List<AttachedFile>.from(
-        _pendingFiles,
-      ),
-    );
-
-    setState(() {
-      _currentChat.messages.add(userMessage);
-
-      if (_currentChat.title == 'محادثة جديدة') {
-        _currentChat.title = _makeTitle(content);
-      }
-
-      _inputController.clear();
-      _pendingFiles.clear();
-      _loading = true;
-    });
-
-    await _saveCurrentChat();
-    _scrollToBottom();
-
-    final assistantMessage = ChatMessage(
-      role: 'assistant',
-      content: '',
-    );
-
-    setState(() {
-      _currentChat.messages.add(assistantMessage);
-    });
-
-    try {
-      await AIService.streamMessage(
-        settings: _settings,
-        messages: _currentChat.messages
-            .
+    var
