@@ -15,28 +15,20 @@ void main() {
   runApp(const WahaAI());
 }
 
-// ============================================================
-// APP
-// ============================================================
-
 class WahaAI extends StatelessWidget {
   const WahaAI({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Waha AI',
       debugShowCheckedModeBanner: false,
+      title: 'Waha AI',
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF60A5FA),
         ),
         scaffoldBackgroundColor: const Color(0xFFF7FAFC),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF7FAFC),
-          elevation: 0,
-        ),
       ),
       home: const ChatPage(),
     );
@@ -44,7 +36,7 @@ class WahaAI extends StatelessWidget {
 }
 
 // ============================================================
-// MODELS
+// MESSAGE
 // ============================================================
 
 class ChatMessage {
@@ -69,11 +61,27 @@ class ChatMessage {
       'role': role,
       'content': content,
       'createdAt': createdAt.toIso8601String(),
-      'files': files.map((e) => e.toJson()).toList(),
+      'files': files.map((file) => file.toJson()).toList(),
     };
   }
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    final rawFiles = json['files'];
+
+    final parsedFiles = <AttachedFile>[];
+
+    if (rawFiles is List) {
+      for (final item in rawFiles) {
+        if (item is Map) {
+          parsedFiles.add(
+            AttachedFile.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          );
+        }
+      }
+    }
+
     return ChatMessage(
       id: json['id']?.toString(),
       role: json['role']?.toString() ?? 'user',
@@ -82,10 +90,40 @@ class ChatMessage {
             json['createdAt']?.toString() ?? '',
           ) ??
           DateTime.now(),
-      files: (json['files'] as List?)
-              ?.map(
-                (e) => AttachedFile.fromJson(
-                  Map<String, dynamic>.from(e),
-                ),
-              )
-              .toList() ??
+      files: parsedFiles,
+    );
+  }
+}
+
+// ============================================================
+// ATTACHED FILE
+// ============================================================
+
+class AttachedFile {
+  final String name;
+  final String path;
+  final int size;
+  final String extension;
+
+  AttachedFile({
+    required this.name,
+    required this.path,
+    required this.size,
+    required this.extension,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'path': path,
+      'size': size,
+      'extension': extension,
+    };
+  }
+
+  factory AttachedFile.fromJson(Map<String, dynamic> json) {
+    return AttachedFile(
+      name: json['name']?.toString() ?? '',
+      path: json['path']?.toString() ?? '',
+      size: int.tryParse(
+            json['size']?.toString() ?? '0',
