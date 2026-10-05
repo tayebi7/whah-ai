@@ -1,8 +1,8 @@
 name: whah_ai
-description: whah ai - مساعد ذكاء اصطناعي متعدد الاستخدامات
+description: Waha AI - مساعد ذكاء اصطناعي متعدد الاستخدامات
 publish_to: "none"
 
-version: 1.0.2+4
+version: 1.0.3+5
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -11,27 +11,33 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # الاتصال بالمزودات و Gateway
-  http: ^1.2.0
+  # الاتصال بالسيرفرات ومزودات الذكاء الاصطناعي
+  http: ^1.2.2
 
-  # حفظ History والإعدادات
-  shared_preferences: ^2.2.3
+  # History والإعدادات والحفظ المحلي
+  shared_preferences: ^2.3.2
 
-  # Markdown والكود
-  flutter_markdown: ^0.7.1
-  markdown: ^7.1.1
+  # عرض Markdown والكود
+  flutter_markdown: ^0.7.3
+  markdown: ^7.2.2
 
-  # اختيار ورفع الملفات
-  file_picker: ^8.0.0
+  # رفع الملفات: PDF / DOCX / TXT / صور / فيديو / ZIP / APK وغيرها
+  file_picker: ^8.1.2
 
   # معرفات المحادثات
-  uuid: ^4.4.0
+  uuid: ^4.5.1
+
+  # حفظ الملفات محلياً
+  path_provider: ^2.1.5
+
+  # فتح التطبيقات والروابط الخارجية
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  flutter_launcher_icons: ^0.13.1
+  flutter_launcher_icons: ^0.14.1
 
   flutter_lints: ^4.0.0
 
@@ -39,7 +45,7 @@ flutter_launcher_icons:
   android: true
   ios: false
   image_path: "assets/icon.png"
-  adaptive_icon_background: "#2563EB"
+  adaptive_icon_background: "#60A5FA"
   adaptive_icon_foreground: "assets/icon_fg.png"
 
 flutter:
