@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,7 +12,23 @@ import 'package:uuid/uuid.dart';
 import 'ai_service.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const WahaAI());
+}
+
+// ───────────────────────────── الثيم (أزرق خفيف مثل Claude) ─────────────────────────────
+
+class AppColors {
+  static const primary = Color(0xFF3B82F6); // أزرق
+  static const primaryLight = Color(0xFF60A5FA);
+  static const bg = Color(0xFFF0F7FF); // خلفية زرقاء فاتحة جداً
+  static const surface = Color(0xFFFFFFFF);
+  static const userBubble = Color(0xFFDBEAFE);
+  static const assistantBubble = Color(0xFFFFFFFF);
+  static const border = Color(0xFFBFDBFE);
+  static const sidebar = Color(0xFFE0F2FE);
+  static const textPrimary = Color(0xFF0F172A);
+  static const textSecondary = Color(0xFF64748B);
 }
 
 class WahaAI extends StatelessWidget {
@@ -21,15 +39,62 @@ class WahaAI extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'WHAH AI',
+      locale: const Locale('ar'),
+      supportedLocales: const [
+        Locale('ar'),
+        Locale('en'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: ThemeData(
         useMaterial3: true,
-        colorSchemeSeed: Colors.lightBlue,
-        scaffoldBackgroundColor: const Color(0xFFF7FBFF),
+        brightness: Brightness.light,
+        colorSchemeSeed: AppColors.primary,
+        scaffoldBackgroundColor: AppColors.bg,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: AppColors.surface,
+          foregroundColor: AppColors.textPrimary,
+          elevation: 0,
+          centerTitle: false,
+        ),
+        drawerTheme: const DrawerThemeData(
+          backgroundColor: AppColors.sidebar,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: AppColors.surface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+          ),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
       ),
       home: const ChatPage(),
     );
   }
 }
+
+// ───────────────────────────── النماذج ─────────────────────────────
 
 class AttachedFile {
   final String name;
@@ -42,13 +107,11 @@ class AttachedFile {
     required this.size,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      'name': name,
-      'path': path,
-      'size': size,
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'path': path,
+        'size': size,
+      };
 
   factory AttachedFile.fromJson(Map<String, dynamic> json) {
     return AttachedFile(
@@ -59,11 +122,17 @@ class AttachedFile {
           : int.tryParse(json['size']?.toString() ?? '') ?? 0,
     );
   }
+
+  String get sizeLabel {
+    if (size < 1024) return '$size B';
+    if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)} KB';
+    return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
 }
 
 class ChatMessage {
   final String id;
-  final String role;
+  final String role; // user | assistant | system
   String content;
   final DateTime createdAt;
   final List<AttachedFile> files;
@@ -78,35 +147,26 @@ class ChatMessage {
         createdAt = createdAt ?? DateTime.now(),
         files = files ?? [];
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'role': role,
-      'content': content,
-      'createdAt': createdAt.toIso8601String(),
-      'files': files.map((file) => file.toJson()).toList(),
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'role': role,
+        'content': content,
+        'createdAt': createdAt.toIso8601String(),
+        'files': files.map((f) => f.toJson()).toList(),
+      };
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     final rawFiles = json['files'];
-
     return ChatMessage(
       id: json['id']?.toString(),
       role: json['role']?.toString() ?? 'user',
       content: json['content']?.toString() ?? '',
-      createdAt: DateTime.tryParse(
-            json['createdAt']?.toString() ?? '',
-          ) ??
+      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
       files: rawFiles is List
           ? rawFiles
               .whereType<Map>()
-              .map(
-                (file) => AttachedFile.fromJson(
-                  Map<String, dynamic>.from(file),
-                ),
-              )
+              .map((f) => AttachedFile.fromJson(Map<String, dynamic>.from(f)))
               .toList()
           : [],
     );
@@ -131,38 +191,27 @@ class ChatHistory {
         updatedAt = updatedAt ?? DateTime.now(),
         messages = messages ?? [];
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'title': title,
-      'createdAt': createdAt.toIso8601String(),
-      'updatedAt': updatedAt.toIso8601String(),
-      'messages': messages.map((message) => message.toJson()).toList(),
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'createdAt': createdAt.toIso8601String(),
+        'updatedAt': updatedAt.toIso8601String(),
+        'messages': messages.map((m) => m.toJson()).toList(),
+      };
 
   factory ChatHistory.fromJson(Map<String, dynamic> json) {
     final rawMessages = json['messages'];
-
     return ChatHistory(
       id: json['id']?.toString(),
       title: json['title']?.toString() ?? 'محادثة جديدة',
-      createdAt: DateTime.tryParse(
-            json['createdAt']?.toString() ?? '',
-          ) ??
+      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
           DateTime.now(),
-      updatedAt: DateTime.tryParse(
-            json['updatedAt']?.toString() ?? '',
-          ) ??
+      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ??
           DateTime.now(),
       messages: rawMessages is List
           ? rawMessages
               .whereType<Map>()
-              .map(
-                (message) => ChatMessage.fromJson(
-                  Map<String, dynamic>.from(message),
-                ),
-              )
+              .map((m) => ChatMessage.fromJson(Map<String, dynamic>.from(m)))
               .toList()
           : [],
     );
@@ -174,48 +223,53 @@ class WahaSettings {
   String endpoint;
   String apiKey;
   String model;
+  bool streamEnabled;
+  String systemPrompt;
 
   WahaSettings({
     this.provider = 'OpenRouter',
-    this.endpoint =
-        'https://openrouter.ai/api/v1/chat/completions',
+    this.endpoint = 'https://openrouter.ai/api/v1',
     this.apiKey = '',
     this.model = 'openai/gpt-4o-mini',
+    this.streamEnabled = true,
+    this.systemPrompt =
+        'أنت مساعد ذكي اسمه WHAH AI. أجب بالعربية بشكل واضح ومفيد. يمكنك كتابة كود، تحليل بيانات، وتحويل مستندات.',
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      'provider': provider,
-      'endpoint': endpoint,
-      'apiKey': apiKey,
-      'model': model,
-    };
-  }
+  Map<String, dynamic> toJson() => {
+        'provider': provider,
+        'endpoint': endpoint,
+        'apiKey': apiKey,
+        'model': model,
+        'streamEnabled': streamEnabled,
+        'systemPrompt': systemPrompt,
+      };
 
   factory WahaSettings.fromJson(Map<String, dynamic> json) {
     return WahaSettings(
       provider: json['provider']?.toString() ?? 'OpenRouter',
       endpoint: json['endpoint']?.toString() ??
-          'https://openrouter.ai/api/v1/chat/completions',
+          'https://openrouter.ai/api/v1',
       apiKey: json['apiKey']?.toString() ?? '',
-      model: json['model']?.toString() ??
-          'openai/gpt-4o-mini',
+      model: json['model']?.toString() ?? 'openai/gpt-4o-mini',
+      streamEnabled: json['streamEnabled'] as bool? ?? true,
+      systemPrompt: json['systemPrompt']?.toString() ??
+          'أنت مساعد ذكي اسمه WHAH AI. أجب بالعربية بشكل واضح ومفيد.',
     );
   }
 }
 
+// ───────────────────────────── التخزين المحلي ─────────────────────────────
+
 class LocalStorage {
-  static const String settingsKey = 'waha_settings';
-  static const String historyKey = 'waha_history';
+  static const settingsKey = 'waha_settings_v2';
+  static const historyKey = 'waha_history_v2';
+  static const appsKey = 'waha_connected_apps';
 
   static Future<WahaSettings> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(settingsKey);
-
-    if (raw == null || raw.isEmpty) {
-      return WahaSettings();
-    }
-
+    if (raw == null || raw.isEmpty) return WahaSettings();
     try {
       return WahaSettings.fromJson(
         Map<String, dynamic>.from(jsonDecode(raw)),
@@ -225,56 +279,60 @@ class LocalStorage {
     }
   }
 
-  static Future<void> saveSettings(WahaSettings settings) async {
+  static Future<void> saveSettings(WahaSettings s) async {
     final prefs = await SharedPreferences.getInstance();
-
-    await prefs.setString(
-      settingsKey,
-      jsonEncode(settings.toJson()),
-    );
+    await prefs.setString(settingsKey, jsonEncode(s.toJson()));
   }
 
   static Future<List<ChatHistory>> loadHistory() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(historyKey);
-
-    if (raw == null || raw.isEmpty) {
-      return [];
-    }
-
+    if (raw == null || raw.isEmpty) return [];
     try {
       final decoded = jsonDecode(raw);
-
-      if (decoded is! List) {
-        return [];
-      }
-
+      if (decoded is! List) return [];
       return decoded
           .whereType<Map>()
-          .map(
-            (item) => ChatHistory.fromJson(
-              Map<String, dynamic>.from(item),
-            ),
-          )
+          .map((i) => ChatHistory.fromJson(Map<String, dynamic>.from(i)))
           .toList();
     } catch (_) {
       return [];
     }
   }
 
-  static Future<void> saveHistory(
-    List<ChatHistory> history,
-  ) async {
+  static Future<void> saveHistory(List<ChatHistory> history) async {
     final prefs = await SharedPreferences.getInstance();
-
     await prefs.setString(
       historyKey,
-      jsonEncode(
-        history.map((chat) => chat.toJson()).toList(),
-      ),
+      jsonEncode(history.map((c) => c.toJson()).toList()),
     );
   }
+
+  static Future<List<Map<String, String>>> loadApps() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(appsKey);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map>()
+          .map((m) => Map<String, String>.from(
+                m.map((k, v) => MapEntry(k.toString(), v.toString())),
+              ))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> saveApps(List<Map<String, String>> apps) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(appsKey, jsonEncode(apps));
+  }
 }
+
+// ───────────────────────────── شاشة المحادثة الرئيسية ─────────────────────────────
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
@@ -285,29 +343,55 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   WahaSettings _settings = WahaSettings();
-
   List<ChatHistory> _history = [];
-
   late ChatHistory _currentChat;
 
-  final TextEditingController _controller =
-      TextEditingController();
-
-  final ScrollController _scrollController =
-      ScrollController();
+  final _controller = TextEditingController();
+  final _scrollController = ScrollController();
+  final _focusNode = FocusNode();
 
   final List<AttachedFile> _attachedFiles = [];
-
   bool _isLoading = false;
+  bool _ready = false;
+
+  // Skills سريعة
+  final List<Map<String, String>> _skills = [
+    {
+      'title': 'برمجة',
+      'prompt': 'اكتب كوداً نظيفاً مع شرح مختصر:',
+      'icon': 'code',
+    },
+    {
+      'title': 'تحليل بيانات',
+      'prompt': 'حلل البيانات التالية وأعطني ملخصاً وإحصائيات:',
+      'icon': 'analytics',
+    },
+    {
+      'title': 'تحويل مستند',
+      'prompt': 'حوّل المحتوى التالي إلى صيغة منظمة (Markdown):',
+      'icon': 'description',
+    },
+    {
+      'title': 'تلخيص',
+      'prompt': 'لخّص النص التالي بشكل واضح ومختصر:',
+      'icon': 'summarize',
+    },
+    {
+      'title': 'ترجمة',
+      'prompt': 'ترجم النص التالي إلى العربية بدقة:',
+      'icon': 'translate',
+    },
+    {
+      'title': 'أفكار',
+      'prompt': 'اقترح أفكاراً إبداعية حول:',
+      'icon': 'lightbulb',
+    },
+  ];
 
   @override
   void initState() {
     super.initState();
-
-    _currentChat = ChatHistory(
-      title: 'محادثة جديدة',
-    );
-
+    _currentChat = ChatHistory(title: 'محادثة جديدة');
     _loadData();
   }
 
@@ -315,141 +399,130 @@ class _ChatPageState extends State<ChatPage> {
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
   Future<void> _loadData() async {
     final settings = await LocalStorage.loadSettings();
     final history = await LocalStorage.loadHistory();
-
     if (!mounted) return;
-
     setState(() {
       _settings = settings;
       _history = history;
-
       if (history.isNotEmpty) {
         _currentChat = history.first;
       }
+      _ready = true;
     });
   }
 
   String _makeTitle(String text) {
-    final clean = text.trim();
-
-    if (clean.isEmpty) {
-      return 'محادثة جديدة';
-    }
-
-    if (clean.length <= 35) {
-      return clean;
-    }
-
-    return '${clean.substring(0, 35)}...';
+    final clean = text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (clean.isEmpty) return 'محادثة جديدة';
+    if (clean.length <= 40) return clean;
+    return '${clean.substring(0, 40)}...';
   }
 
   Future<void> _saveCurrentChat() async {
-    final index = _history.indexWhere(
-      (chat) => chat.id == _currentChat.id,
-    );
-
     _currentChat.updatedAt = DateTime.now();
-
+    final index = _history.indexWhere((c) => c.id == _currentChat.id);
     if (index >= 0) {
       _history[index] = _currentChat;
     } else {
       _history.insert(0, _currentChat);
     }
-
+    // رتب حسب آخر تحديث
+    _history.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     await LocalStorage.saveHistory(_history);
   }
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
-
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 180),
+        duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
       );
     });
   }
 
+  // ─── اختيار ملفات (file_picker 13) ───
   Future<void> _pickFiles() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        withData: false,
+      // API الجديد في file_picker 13: يعيد List<PlatformFile> مباشرة
+      final files = await FilePicker.pickFiles(
+        type: FileType.any,
       );
 
-      if (result == null) return;
+      if (files.isEmpty) return;
 
       setState(() {
-        _attachedFiles.addAll(
-          result.files.map(
-            (file) => AttachedFile(
+        for (final file in files) {
+          final size = file.lengthSync() ?? 0;
+          _attachedFiles.add(
+            AttachedFile(
               name: file.name,
               path: file.path ?? '',
-              size: file.size,
+              size: size,
             ),
-          ),
-        );
+          );
+        }
       });
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('تعذر اختيار الملفات: $e'),
-        ),
+        SnackBar(content: Text('تعذر اختيار الملفات: $e')),
       );
     }
   }
 
   Future<void> _copyText(String text) async {
-    await Clipboard.setData(
-      ClipboardData(text: text),
-    );
-
+    await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('تم النسخ'),
+        content: Text('تم النسخ إلى الحافظة'),
         duration: Duration(seconds: 1),
       ),
     );
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data?.text == null || data!.text!.isEmpty) return;
+    final current = _controller.text;
+    final selection = _controller.selection;
+    final start = selection.start >= 0 ? selection.start : current.length;
+    final end = selection.end >= 0 ? selection.end : current.length;
+    final newText = current.replaceRange(start, end, data.text!);
+    _controller.text = newText;
+    _controller.selection = TextSelection.collapsed(
+      offset: start + data.text!.length,
+    );
+    setState(() {});
   }
 
   Future<void> _openSettings() async {
     final result = await Navigator.push<WahaSettings>(
       context,
       MaterialPageRoute(
-        builder: (_) => SettingsPage(
-          settings: _settings,
-        ),
+        builder: (_) => SettingsPage(settings: _settings),
       ),
     );
-
     if (result == null) return;
-
-    setState(() {
-      _settings = result;
-    });
-
+    setState(() => _settings = result);
     await LocalStorage.saveSettings(_settings);
   }
 
   void _newChat() {
     setState(() {
-      _currentChat = ChatHistory(
-        title: 'محادثة جديدة',
-      );
-
+      _currentChat = ChatHistory(title: 'محادثة جديدة');
       _attachedFiles.clear();
       _controller.clear();
     });
+    if (Navigator.canPop(context)) Navigator.pop(context);
   }
 
   void _selectChat(ChatHistory chat) {
@@ -458,32 +531,53 @@ class _ChatPageState extends State<ChatPage> {
       _attachedFiles.clear();
       _controller.clear();
     });
-
     Navigator.pop(context);
+  }
+
+  Future<void> _deleteChat(ChatHistory chat) async {
+    setState(() {
+      _history.removeWhere((c) => c.id == chat.id);
+      if (_currentChat.id == chat.id) {
+        _currentChat = ChatHistory(title: 'محادثة جديدة');
+      }
+    });
+    await LocalStorage.saveHistory(_history);
+  }
+
+  void _applySkill(Map<String, String> skill) {
+    final prompt = skill['prompt'] ?? '';
+    _controller.text = prompt;
+    _controller.selection = TextSelection.collapsed(offset: prompt.length);
+    _focusNode.requestFocus();
   }
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
+    if (text.isEmpty && _attachedFiles.isEmpty) return;
+    if (_isLoading) return;
 
-    if (text.isEmpty && _attachedFiles.isEmpty) {
+    // تحقق من الإعدادات
+    if (_settings.apiKey.trim().isEmpty &&
+        _settings.provider != 'Custom' &&
+        _settings.provider != 'Gateway') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('أدخل مفتاح API من الإعدادات أولاً'),
+          action: SnackBarAction(
+            label: 'الإعدادات',
+            onPressed: _openSettings,
+          ),
+        ),
+      );
       return;
     }
 
-    if (_isLoading) {
-      return;
-    }
-
-    final userText = text.isEmpty
-        ? 'حلل الملفات المرفقة.'
-        : text;
-
-    final attached = List<AttachedFile>.from(
-      _attachedFiles,
-    );
+    final userText = text.isEmpty ? 'حلل الملفات المرفقة.' : text;
+    final attached = List<AttachedFile>.from(_attachedFiles);
 
     final displayText = attached.isEmpty
         ? userText
-        : '$userText\n\nالملفات المرفقة:\n${attached.map((file) => '• ${file.name}').join('\n')}';
+        : '$userText\n\nالملفات المرفقة:\n${attached.map((f) => '• ${f.name} (${f.sizeLabel})').join('\n')}';
 
     final userMessage = ChatMessage(
       role: 'user',
@@ -495,20 +589,14 @@ class _ChatPageState extends State<ChatPage> {
       if (_currentChat.messages.isEmpty) {
         _currentChat.title = _makeTitle(userText);
       }
-
       _currentChat.messages.add(userMessage);
       _attachedFiles.clear();
       _controller.clear();
       _isLoading = true;
     });
-
     _scrollToBottom();
 
-    final assistantMessage = ChatMessage(
-      role: 'assistant',
-      content: '',
-    );
-
+    final assistantMessage = ChatMessage(role: 'assistant', content: '');
     setState(() {
       _currentChat.messages.add(assistantMessage);
     });
@@ -521,65 +609,67 @@ class _ChatPageState extends State<ChatPage> {
         provider: _settings.provider,
       );
 
-      final messages = _currentChat.messages
-          .where(
-            (message) =>
-                message.role == 'user' ||
-                message.role == 'assistant',
-          )
-          .where(
-            (message) => message.content.trim().isNotEmpty,
-          )
-          .map(
-            (message) => <String, String>{
-              'role': message.role,
-              'content': message.content,
-            },
-          )
-          .toList();
+      // بناء الرسائل مع system prompt
+      final messages = <Map<String, dynamic>>[];
 
-      await service.streamMessage(
-        messages: messages,
-        onChunk: (chunk) {
-          if (!mounted) return;
+      if (_settings.systemPrompt.trim().isNotEmpty) {
+        messages.add({
+          'role': 'system',
+          'content': _settings.systemPrompt.trim(),
+        });
+      }
 
-          setState(() {
-            assistantMessage.content += chunk;
-          });
+      for (final m in _currentChat.messages) {
+        if (m.role == 'assistant' && m.content.trim().isEmpty) continue;
+        if (m.content.trim().isEmpty) continue;
+        messages.add({
+          'role': m.role,
+          'content': m.content,
+        });
+      }
 
-          _scrollToBottom();
-        },
-      );
-
-      if (assistantMessage.content.trim().isEmpty) {
-        final result = await service.sendMessage(
+      if (_settings.streamEnabled) {
+        await service.streamMessage(
           messages: messages,
+          onChunk: (chunk) {
+            if (!mounted) return;
+            setState(() {
+              assistantMessage.content += chunk;
+            });
+            _scrollToBottom();
+          },
         );
 
+        // fallback إذا لم يصل أي جزء
+        if (assistantMessage.content.trim().isEmpty) {
+          final result = await service.sendMessage(messages: messages);
+          if (mounted) {
+            setState(() => assistantMessage.content = result);
+          }
+        }
+      } else {
+        final result = await service.sendMessage(messages: messages);
         if (mounted) {
-          setState(() {
-            assistantMessage.content = result;
-          });
+          setState(() => assistantMessage.content = result);
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           assistantMessage.content =
-              'حدث خطأ أثناء الاتصال:\n\n$e';
+              '⚠️ حدث خطأ أثناء الاتصال:\n\n$e\n\nتحقق من:\n• مفتاح API\n• عنوان الـ Endpoint\n• اسم النموذج\n• اتصال الإنترنت';
         });
       }
     } finally {
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
-
       await _saveCurrentChat();
       _scrollToBottom();
     }
   }
+
+  // ─── الواجهة ───
 
   Widget _buildDrawer() {
     return Drawer(
@@ -588,57 +678,75 @@ class _ChatPageState extends State<ChatPage> {
           children: [
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
               decoration: const BoxDecoration(
-                color: Color(0xFFE3F4FF),
+                gradient: LinearGradient(
+                  colors: [Color(0xFF3B82F6), Color(0xFF60A5FA)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
               ),
               child: const Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.auto_awesome,
-                    size: 38,
-                    color: Colors.lightBlue,
-                  ),
+                  Icon(Icons.auto_awesome, size: 36, color: Colors.white),
                   SizedBox(height: 10),
                   Text(
                     'WHAH AI',
                     style: TextStyle(
-                      fontSize: 24,
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
+                      color: Colors.white,
                     ),
                   ),
-                  SizedBox(height: 4),
-                  Text('مساعد الذكاء الاصطناعي'),
+                  SizedBox(height: 2),
+                  Text(
+                    'مساعد ذكاء اصطناعي متعدد',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
                 ],
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.add),
+              leading: const Icon(Icons.add_comment_outlined),
               title: const Text('محادثة جديدة'),
               onTap: _newChat,
             ),
             ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('الإعدادات'),
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('الإعدادات والمزودين'),
               onTap: () {
                 Navigator.pop(context);
                 _openSettings();
               },
             ),
-            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.extension_outlined),
+              title: const Text('Skills والربط'),
+              onTap: () {
+                Navigator.pop(context);
+                _showSkillsSheet();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.link),
+              title: const Text('التطبيقات المرتبطة'),
+              onTap: () {
+                Navigator.pop(context);
+                _showConnectedApps();
+              },
+            ),
+            const Divider(height: 1),
             const Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 8,
-              ),
+              padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: Align(
                 alignment: Alignment.centerRight,
                 child: Text(
-                  'المحادثات',
+                  'المحادثات السابقة',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
                   ),
                 ),
               ),
@@ -648,22 +756,30 @@ class _ChatPageState extends State<ChatPage> {
                   ? const Center(
                       child: Text(
                         'لا توجد محادثات محفوظة',
+                        style: TextStyle(color: AppColors.textSecondary),
                       ),
                     )
                   : ListView.builder(
                       itemCount: _history.length,
                       itemBuilder: (context, index) {
                         final chat = _history[index];
-
+                        final selected = chat.id == _currentChat.id;
                         return ListTile(
-                          leading: const Icon(
-                            Icons.chat_bubble_outline,
-                          ),
+                          selected: selected,
+                          selectedTileColor: AppColors.userBubble,
+                          leading: const Icon(Icons.chat_bubble_outline, size: 20),
                           title: Text(
                             chat.title,
                             maxLines: 1,
-                            overflow:
-                                TextOverflow.ellipsis,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight:
+                                  selected ? FontWeight.w600 : FontWeight.normal,
+                            ),
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 18),
+                            onPressed: () => _deleteChat(chat),
                           ),
                           onTap: () => _selectChat(chat),
                         );
@@ -676,101 +792,184 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
+  void _showSkillsSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Skills — مهارات سريعة',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: _skills.map((s) {
+                  return ActionChip(
+                    avatar: Icon(_skillIcon(s['icon']), size: 18),
+                    label: Text(s['title']!),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _applySkill(s);
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'اضغط على مهارة لإدخال الأمر في صندوق الكتابة.',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  IconData _skillIcon(String? name) {
+    switch (name) {
+      case 'code':
+        return Icons.code;
+      case 'analytics':
+        return Icons.analytics_outlined;
+      case 'description':
+        return Icons.description_outlined;
+      case 'summarize':
+        return Icons.short_text;
+      case 'translate':
+        return Icons.translate;
+      case 'lightbulb':
+        return Icons.lightbulb_outline;
+      default:
+        return Icons.auto_awesome;
+    }
+  }
+
+  void _showConnectedApps() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => const ConnectedAppsSheet(),
+    );
+  }
+
   Widget _buildMessage(ChatMessage message) {
     final isUser = message.role == 'user';
 
     return Align(
-      alignment: isUser
-          ? Alignment.centerRight
-          : Alignment.centerLeft,
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: const BoxConstraints(
-          maxWidth: 900,
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.88,
         ),
-        margin: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 6,
-        ),
-        padding: const EdgeInsets.all(14),
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
         decoration: BoxDecoration(
-          color: isUser
-              ? const Color(0xFFDDF2FF)
-              : Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: const Color(0xFFDCEAF2),
+          color: isUser ? AppColors.userBubble : AppColors.assistantBubble,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(isUser ? 18 : 4),
+            bottomRight: Radius.circular(isUser ? 4 : 18),
           ),
+          border: Border.all(color: AppColors.border.withOpacity(0.6)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  isUser
-                      ? Icons.person_outline
-                      : Icons.auto_awesome,
-                  size: 18,
+                  isUser ? Icons.person_outline : Icons.auto_awesome,
+                  size: 16,
+                  color: AppColors.primary,
                 ),
-                const SizedBox(width: 7),
+                const SizedBox(width: 6),
                 Text(
                   isUser ? 'أنت' : 'WHAH AI',
                   style: const TextStyle(
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             if (message.content.isNotEmpty)
-              MarkdownBody(
-                data: message.content,
-                selectable: true,
-                onTapLink: (
-                  text,
-                  href,
-                  title,
-                ) async {
-                  if (href == null) return;
-
-                  final uri = Uri.tryParse(href);
-
-                  if (uri != null) {
-                    await launchUrl(
-                      uri,
-                      mode:
-                          LaunchMode.externalApplication,
-                    );
-                  }
-                },
+              SelectableRegion(
+                focusNode: FocusNode(),
+                selectionControls: materialTextSelectionControls,
+                child: MarkdownBody(
+                  data: message.content,
+                  selectable: true,
+                  styleSheet: MarkdownStyleSheet(
+                    p: const TextStyle(
+                      fontSize: 15,
+                      height: 1.45,
+                      color: AppColors.textPrimary,
+                    ),
+                    code: TextStyle(
+                      backgroundColor: const Color(0xFFEFF6FF),
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                    ),
+                    codeblockDecoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    codeblockPadding: const EdgeInsets.all(12),
+                  ),
+                  onTapLink: (text, href, title) async {
+                    if (href == null) return;
+                    final uri = Uri.tryParse(href);
+                    if (uri != null) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                ),
               ),
             if (message.files.isNotEmpty) ...[
               const SizedBox(height: 8),
               ...message.files.map(
                 (file) => Container(
-                  margin:
-                      const EdgeInsets.only(top: 5),
-                  padding:
-                      const EdgeInsets.all(8),
+                  margin: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F7FA),
-                    borderRadius:
-                        BorderRadius.circular(10),
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Row(
                     children: [
-                      const Icon(
-                        Icons.insert_drive_file,
-                        size: 18,
-                      ),
+                      const Icon(Icons.attach_file, size: 16),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          file.name,
-                          overflow:
-                              TextOverflow.ellipsis,
+                          '${file.name}  (${file.sizeLabel})',
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13),
                         ),
                       ),
                     ],
@@ -778,18 +977,14 @@ class _ChatPageState extends State<ChatPage> {
                 ),
               ),
             ],
-            if (!isUser &&
-                message.content.isNotEmpty)
+            if (!isUser && message.content.isNotEmpty)
               Align(
-                alignment: Alignment.centerRight,
+                alignment: Alignment.centerLeft,
                 child: IconButton(
                   tooltip: 'نسخ',
-                  onPressed: () =>
-                      _copyText(message.content),
-                  icon: const Icon(
-                    Icons.copy_outlined,
-                    size: 18,
-                  ),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => _copyText(message.content),
+                  icon: const Icon(Icons.copy_outlined, size: 16),
                 ),
               ),
           ],
@@ -801,43 +996,59 @@ class _ChatPageState extends State<ChatPage> {
   Widget _buildWelcome() {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(28),
         child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 80,
-              height: 80,
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: const Color(0xFFDFF4FF),
-                borderRadius:
-                    BorderRadius.circular(24),
+                color: AppColors.userBubble,
+                shape: BoxShape.circle,
               ),
               child: const Icon(
                 Icons.auto_awesome,
-                size: 42,
-                color: Colors.lightBlue,
+                size: 48,
+                color: AppColors.primary,
               ),
             ),
             const SizedBox(height: 20),
             const Text(
-              'مرحبًا بك في WHAH AI',
-              textAlign: TextAlign.center,
+              'مرحباً بك في WHAH AI',
               style: TextStyle(
-                fontSize: 28,
+                fontSize: 24,
                 fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
               ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             const Text(
-              'اسألني عن البرمجة، المستندات، التحليل، الأفكار والمزيد.',
+              'مساعد ذكي للبرمجة، التحليل، التحويل، والإبداع',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.black54,
-              ),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 15),
             ),
+            const SizedBox(height: 28),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              alignment: WrapAlignment.center,
+              children: _skills.map((s) {
+                return ActionChip(
+                  avatar: Icon(_skillIcon(s['icon']), size: 18),
+                  label: Text(s['title']!),
+                  backgroundColor: AppColors.surface,
+                  side: const BorderSide(color: AppColors.border),
+                  onPressed: () => _applySkill(s),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 24),
+            if (_settings.apiKey.isEmpty)
+              FilledButton.icon(
+                onPressed: _openSettings,
+                icon: const Icon(Icons.key),
+                label: const Text('إعداد مزود الذكاء الاصطناعي'),
+              ),
           ],
         ),
       ),
@@ -845,147 +1056,102 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildComposer() {
-    return SafeArea(
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(
-          12,
-          8,
-          12,
-          10,
-        ),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(
-            top: BorderSide(
-              color: Color(0xFFE1EDF3),
-            ),
-          ),
-        ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.border.withOpacity(0.5))),
+      ),
+      child: SafeArea(
+        top: false,
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             if (_attachedFiles.isNotEmpty)
               SizedBox(
-                height: 45,
-                child: ListView(
-                  scrollDirection:
-                      Axis.horizontal,
-                  children: _attachedFiles.map(
-                    (file) {
-                      return Container(
-                        margin:
-                            const EdgeInsets.only(
-                          right: 6,
-                        ),
-                        padding:
-                            const EdgeInsets.symmetric(
-                          horizontal: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color:
-                              const Color(0xFFEAF7FF),
-                          borderRadius:
-                              BorderRadius.circular(
-                            12,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize:
-                              MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.attach_file,
-                              size: 17,
-                            ),
-                            const SizedBox(width: 5),
-                            ConstrainedBox(
-                              constraints:
-                                  const BoxConstraints(
-                                maxWidth: 180,
-                              ),
-                              child: Text(
-                                file.name,
-                                overflow:
-                                    TextOverflow.ellipsis,
-                              ),
-                            ),
-                            IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints:
-                                  const BoxConstraints(),
-                              onPressed: () {
-                                setState(() {
-                                  _attachedFiles
-                                      .remove(file);
-                                });
-                              },
-                              icon: const Icon(
-                                Icons.close,
-                                size: 17,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ).toList(),
+                height: 44,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _attachedFiles.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, i) {
+                    final f = _attachedFiles[i];
+                    return Chip(
+                      avatar: const Icon(Icons.insert_drive_file, size: 16),
+                      label: Text(
+                        f.name,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      deleteIcon: const Icon(Icons.close, size: 16),
+                      onDeleted: () {
+                        setState(() => _attachedFiles.removeAt(i));
+                      },
+                    );
+                  },
                 ),
               ),
             Row(
-              crossAxisAlignment:
-                  CrossAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 IconButton(
                   tooltip: 'إرفاق ملف',
-                  onPressed:
-                      _isLoading ? null : _pickFiles,
-                  icon: const Icon(
-                    Icons.attach_file,
-                  ),
+                  onPressed: _isLoading ? null : _pickFiles,
+                  icon: const Icon(Icons.attach_file),
+                ),
+                IconButton(
+                  tooltip: 'لصق من الحافظة',
+                  onPressed: _isLoading ? null : _pasteFromClipboard,
+                  icon: const Icon(Icons.content_paste),
                 ),
                 Expanded(
                   child: TextField(
                     controller: _controller,
+                    focusNode: _focusNode,
                     minLines: 1,
-                    maxLines: 7,
-                    textInputAction:
-                        TextInputAction.newline,
-                    decoration:
-                        InputDecoration(
-                      hintText:
-                          'اكتب رسالتك...',
-                      filled: true,
-                      fillColor:
-                          const Color(0xFFF4F9FC),
+                    maxLines: 6,
+                    textInputAction: TextInputAction.newline,
+                    enabled: !_isLoading,
+                    decoration: InputDecoration(
+                      hintText: 'اكتب رسالتك هنا...',
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                       border: OutlineInputBorder(
-                        borderRadius:
-                            BorderRadius.circular(
-                          20,
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(22),
+                        borderSide: const BorderSide(color: AppColors.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(22),
+                        borderSide: const BorderSide(
+                          color: AppColors.primary,
+                          width: 1.5,
                         ),
-                        borderSide:
-                            BorderSide.none,
                       ),
                     ),
+                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
                 const SizedBox(width: 6),
-                IconButton.filled(
-                  tooltip: 'إرسال',
-                  onPressed:
-                      _isLoading
-                          ? null
-                          : _sendMessage,
-                  icon: _isLoading
+                FilledButton(
+                  onPressed: _isLoading ? null : _sendMessage,
+                  style: FilledButton.styleFrom(
+                    shape: const CircleBorder(),
+                    padding: const EdgeInsets.all(14),
+                  ),
+                  child: _isLoading
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child:
-                              CircularProgressIndicator(
+                          child: CircularProgressIndicator(
                             strokeWidth: 2,
+                            color: Colors.white,
                           ),
                         )
-                      : const Icon(
-                          Icons.arrow_upward,
-                        ),
+                      : const Icon(Icons.send_rounded, size: 20),
                 ),
               ],
             ),
@@ -997,22 +1163,23 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_ready) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
-      drawer: _buildDrawer(),
       appBar: AppBar(
-        title: const Text(
-          'WHAH AI',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
+        title: Text(
+          _currentChat.title,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
         actions: [
           IconButton(
             tooltip: 'محادثة جديدة',
             onPressed: _newChat,
-            icon: const Icon(Icons.add),
+            icon: const Icon(Icons.add_comment_outlined),
           ),
           IconButton(
             tooltip: 'الإعدادات',
@@ -1021,6 +1188,7 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ],
       ),
+      drawer: _buildDrawer(),
       body: Column(
         children: [
           Expanded(
@@ -1028,22 +1196,18 @@ class _ChatPageState extends State<ChatPage> {
                 ? _buildWelcome()
                 : ListView.builder(
                     controller: _scrollController,
-                    padding:
-                        const EdgeInsets.symmetric(
-                      vertical: 12,
-                    ),
-                    itemCount:
-                        _currentChat.messages.length,
-                    itemBuilder: (
-                      context,
-                      index,
-                    ) {
-                      return _buildMessage(
-                        _currentChat.messages[index],
-                      );
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    itemCount: _currentChat.messages.length,
+                    itemBuilder: (context, index) {
+                      return _buildMessage(_currentChat.messages[index]);
                     },
                   ),
           ),
+          if (_isLoading)
+            const LinearProgressIndicator(
+              minHeight: 2,
+              color: AppColors.primary,
+            ),
           _buildComposer(),
         ],
       ),
@@ -1051,47 +1215,211 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
-class SettingsPage extends StatefulWidget {
-  final WahaSettings settings;
+// ───────────────────────────── التطبيقات المرتبطة ─────────────────────────────
 
-  const SettingsPage({
-    super.key,
-    required this.settings,
-  });
+class ConnectedAppsSheet extends StatefulWidget {
+  const ConnectedAppsSheet({super.key});
 
   @override
-  State<SettingsPage> createState() =>
-      _SettingsPageState();
+  State<ConnectedAppsSheet> createState() => _ConnectedAppsSheetState();
 }
 
-class _SettingsPageState
-    extends State<SettingsPage> {
-  late TextEditingController _endpointController;
-  late TextEditingController _apiKeyController;
-  late TextEditingController _modelController;
-
-  late String _provider;
+class _ConnectedAppsSheetState extends State<ConnectedAppsSheet> {
+  List<Map<String, String>> _apps = [];
+  final _nameCtrl = TextEditingController();
+  final _urlCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    _load();
+  }
 
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final apps = await LocalStorage.loadApps();
+    if (!mounted) return;
+    setState(() => _apps = apps);
+  }
+
+  Future<void> _add() async {
+    final name = _nameCtrl.text.trim();
+    final url = _urlCtrl.text.trim();
+    if (name.isEmpty || url.isEmpty) return;
+    setState(() {
+      _apps.add({'name': name, 'url': url});
+      _nameCtrl.clear();
+      _urlCtrl.clear();
+    });
+    await LocalStorage.saveApps(_apps);
+  }
+
+  Future<void> _remove(int i) async {
+    setState(() => _apps.removeAt(i));
+    await LocalStorage.saveApps(_apps);
+  }
+
+  Future<void> _open(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri != null) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'التطبيقات المرتبطة',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'أضف اسم التطبيق ورابطه (مثل GitHub أو أي خدمة)',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _nameCtrl,
+            decoration: const InputDecoration(
+              labelText: 'اسم التطبيق',
+              hintText: 'GitHub',
+              prefixIcon: Icon(Icons.apps),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _urlCtrl,
+            decoration: const InputDecoration(
+              labelText: 'الرابط',
+              hintText: 'https://github.com/...',
+              prefixIcon: Icon(Icons.link),
+            ),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _add,
+            icon: const Icon(Icons.add),
+            label: const Text('إضافة وربط'),
+          ),
+          const SizedBox(height: 16),
+          if (_apps.isEmpty)
+            const Text(
+              'لا توجد تطبيقات مرتبطة بعد',
+              style: TextStyle(color: AppColors.textSecondary),
+            )
+          else
+            ...List.generate(_apps.length, (i) {
+              final app = _apps[i];
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.link),
+                title: Text(app['name'] ?? ''),
+                subtitle: Text(
+                  app['url'] ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.open_in_new, size: 20),
+                      onPressed: () => _open(app['url'] ?? ''),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      onPressed: () => _remove(i),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+}
+
+// ───────────────────────────── شاشة الإعدادات ─────────────────────────────
+
+class SettingsPage extends StatefulWidget {
+  final WahaSettings settings;
+
+  const SettingsPage({super.key, required this.settings});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late TextEditingController _endpointController;
+  late TextEditingController _apiKeyController;
+  late TextEditingController _modelController;
+  late TextEditingController _systemController;
+  late String _provider;
+  late bool _streamEnabled;
+  bool _testing = false;
+  String? _testResult;
+
+  static const _providers = {
+    'OpenRouter': {
+      'endpoint': 'https://openrouter.ai/api/v1',
+      'model': 'openai/gpt-4o-mini',
+    },
+    'OpenAI': {
+      'endpoint': 'https://api.openai.com/v1',
+      'model': 'gpt-4o-mini',
+    },
+    'Groq': {
+      'endpoint': 'https://api.groq.com/openai/v1',
+      'model': 'llama-3.3-70b-versatile',
+    },
+    'NVIDIA NIM': {
+      'endpoint': 'https://integrate.api.nvidia.com/v1',
+      'model': 'meta/llama-3.1-8b-instruct',
+    },
+    'Together': {
+      'endpoint': 'https://api.together.xyz/v1',
+      'model': 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+    },
+    'Gateway': {
+      'endpoint': '',
+      'model': '',
+    },
+    'Custom': {
+      'endpoint': '',
+      'model': '',
+    },
+  };
+
+  @override
+  void initState() {
+    super.initState();
     _provider = widget.settings.provider;
-
+    _streamEnabled = widget.settings.streamEnabled;
     _endpointController =
-        TextEditingController(
-      text: widget.settings.endpoint,
-    );
-
-    _apiKeyController =
-        TextEditingController(
-      text: widget.settings.apiKey,
-    );
-
-    _modelController =
-        TextEditingController(
-      text: widget.settings.model,
-    );
+        TextEditingController(text: widget.settings.endpoint);
+    _apiKeyController = TextEditingController(text: widget.settings.apiKey);
+    _modelController = TextEditingController(text: widget.settings.model);
+    _systemController =
+        TextEditingController(text: widget.settings.systemPrompt);
   }
 
   @override
@@ -1099,38 +1427,55 @@ class _SettingsPageState
     _endpointController.dispose();
     _apiKeyController.dispose();
     _modelController.dispose();
+    _systemController.dispose();
     super.dispose();
   }
 
   void _applyProvider(String provider) {
     setState(() {
       _provider = provider;
-
-      if (provider == 'OpenRouter') {
-        _endpointController.text =
-            'https://openrouter.ai/api/v1/chat/completions';
-
-        if (_modelController.text.trim().isEmpty) {
-          _modelController.text =
-              'openai/gpt-4o-mini';
+      final preset = _providers[provider];
+      if (preset != null) {
+        if (preset['endpoint']!.isNotEmpty) {
+          _endpointController.text = preset['endpoint']!;
         }
-      } else if (provider == 'OpenAI') {
-        _endpointController.text =
-            'https://api.openai.com/v1/chat/completions';
-
-        if (_modelController.text.trim().isEmpty) {
-          _modelController.text = 'gpt-4o-mini';
-        }
-      } else if (provider == 'NVIDIA NIM') {
-        _endpointController.text =
-            'https://integrate.api.nvidia.com/v1/chat/completions';
-
-        if (_modelController.text.trim().isEmpty) {
-          _modelController.text =
-              'meta/llama-3.1-8b-instruct';
+        if (preset['model']!.isNotEmpty &&
+            _modelController.text.trim().isEmpty) {
+          _modelController.text = preset['model']!;
+        } else if (preset['model']!.isNotEmpty) {
+          _modelController.text = preset['model']!;
         }
       }
     });
+  }
+
+  Future<void> _testConnection() async {
+    setState(() {
+      _testing = true;
+      _testResult = null;
+    });
+
+    final service = AIService(
+      endpoint: _endpointController.text.trim(),
+      apiKey: _apiKeyController.text.trim(),
+      model: _modelController.text.trim(),
+      provider: _provider,
+    );
+
+    try {
+      final ok = await service.testConnection();
+      setState(() {
+        _testResult = ok
+            ? '✅ الاتصال ناجح'
+            : '❌ فشل الاتصال — تحقق من المفتاح والنموذج';
+      });
+    } catch (e) {
+      setState(() {
+        _testResult = '❌ $e';
+      });
+    } finally {
+      setState(() => _testing = false);
+    }
   }
 
   void _save() {
@@ -1138,12 +1483,11 @@ class _SettingsPageState
       context,
       WahaSettings(
         provider: _provider,
-        endpoint:
-            _endpointController.text.trim(),
-        apiKey:
-            _apiKeyController.text.trim(),
-        model:
-            _modelController.text.trim(),
+        endpoint: _endpointController.text.trim(),
+        apiKey: _apiKeyController.text.trim(),
+        model: _modelController.text.trim(),
+        streamEnabled: _streamEnabled,
+        systemPrompt: _systemController.text.trim(),
       ),
     );
   }
@@ -1166,103 +1510,116 @@ class _SettingsPageState
         children: [
           const Text(
             'مزود الذكاء الاصطناعي',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           DropdownButtonFormField<String>(
             value: _provider,
-            decoration:
-                const InputDecoration(
+            decoration: const InputDecoration(
               border: OutlineInputBorder(),
-              prefixIcon:
-                  Icon(Icons.cloud_outlined),
+              prefixIcon: Icon(Icons.cloud_outlined),
             ),
-            items: const [
-              DropdownMenuItem(
-                value: 'OpenRouter',
-                child: Text('OpenRouter'),
-              ),
-              DropdownMenuItem(
-                value: 'OpenAI',
-                child: Text('OpenAI'),
-              ),
-              DropdownMenuItem(
-                value: 'NVIDIA NIM',
-                child: Text('NVIDIA NIM'),
-              ),
-              DropdownMenuItem(
-                value: 'Gateway',
-                child: Text('Gateway'),
-              ),
-              DropdownMenuItem(
-                value: 'Custom',
-                child: Text('Custom API'),
-              ),
-            ],
-            onChanged: (value) {
-              if (value != null) {
-                _applyProvider(value);
-              }
+            items: _providers.keys
+                .map(
+                  (p) => DropdownMenuItem(value: p, child: Text(p)),
+                )
+                .toList(),
+            onChanged: (v) {
+              if (v != null) _applyProvider(v);
             },
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           TextField(
             controller: _endpointController,
             decoration: const InputDecoration(
-              labelText: 'API Endpoint',
-              hintText:
-                  'https://example.com/v1/chat/completions',
+              labelText: 'API Endpoint (Base أو كامل)',
+              hintText: 'https://openrouter.ai/api/v1',
               border: OutlineInputBorder(),
-              prefixIcon:
-                  Icon(Icons.link),
+              prefixIcon: Icon(Icons.link),
+              helperText:
+                  'يمكنك وضع الرابط الأساسي فقط، سيُضاف /chat/completions تلقائياً',
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           TextField(
             controller: _apiKeyController,
             obscureText: true,
             decoration: const InputDecoration(
               labelText: 'API Key',
               border: OutlineInputBorder(),
-              prefixIcon:
-                  Icon(Icons.key_outlined),
+              prefixIcon: Icon(Icons.key_outlined),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           TextField(
             controller: _modelController,
             decoration: const InputDecoration(
               labelText: 'Model',
-              hintText:
-                  'openai/gpt-4o-mini',
+              hintText: 'openai/gpt-4o-mini',
               border: OutlineInputBorder(),
-              prefixIcon:
-                  Icon(Icons.smart_toy_outlined),
+              prefixIcon: Icon(Icons.smart_toy_outlined),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _systemController,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              labelText: 'System Prompt (تعليمات النظام)',
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.psychology_outlined),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            title: const Text('البث المباشر (Streaming)'),
+            subtitle: const Text('استجابة فورية مثل ChatGPT و Claude'),
+            value: _streamEnabled,
+            activeColor: AppColors.primary,
+            onChanged: (v) => setState(() => _streamEnabled = v),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _testing ? null : _testConnection,
+            icon: _testing
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.wifi_tethering),
+            label: Text(_testing ? 'جاري الاختبار...' : 'اختبار الاتصال'),
+          ),
+          if (_testResult != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _testResult!,
+              style: TextStyle(
+                color: _testResult!.startsWith('✅')
+                    ? Colors.green.shade700
+                    : Colors.red.shade700,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+          const SizedBox(height: 20),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: const Color(0xFFEAF7FF),
-              borderRadius:
-                  BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(14),
             ),
             child: const Row(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.info_outline,
-                  color: Colors.lightBlue,
-                ),
+                Icon(Icons.info_outline, color: AppColors.primary),
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'يمكنك استخدام OpenRouter أو OpenAI أو NVIDIA NIM أو أي Gateway متوافق مع OpenAI API.',
+                    'يدعم OpenRouter و OpenAI و Groq و NVIDIA و Together وأي Gateway متوافق مع OpenAI API.\n'
+                    'للـ Gateway أو Custom: ضع الرابط الأساسي أو الكامل يدوياً.',
+                    style: TextStyle(fontSize: 13, height: 1.4),
                   ),
                 ),
               ],
