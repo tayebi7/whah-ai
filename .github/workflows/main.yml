@@ -60,22 +60,30 @@ jobs:
       - name: Launcher icons
         run: dart run flutter_launcher_icons
 
-      - name: Analyze (non-fatal)
-        run: flutter analyze || true
-
       - name: Build APK
-        run: flutter build apk --release --verbose 2>&1 | tee build_log.txt
+        run: flutter build apk --release
+
+      - name: Locate APK
+        run: |
+          echo "Searching for APK files..."
+          find build -name "*.apk" -type f 2>/dev/null || true
+          APK=$(find build -name "app-release.apk" -type f 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            APK=$(find build -name "*.apk" -type f 2>/dev/null | head -1)
+          fi
+          if [ -z "$APK" ]; then
+            echo "ERROR: No APK found under build/"
+            find build -type f 2>/dev/null | head -80 || true
+            exit 1
+          fi
+          echo "Found APK: $APK"
+          ls -lh "$APK"
+          mkdir -p out
+          cp "$APK" out/whah-ai.apk
 
       - name: Upload APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: whah-ai-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
-
-      - name: Upload build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build_log.txt
+          path: out/whah-ai.apk
+          if-no-files-found: error
