@@ -56,10 +56,6 @@ jobs:
           echo "compileSdk:"
           grep "compileSdk" "$GRADLE"
 
-          echo "Android SDK packages:"
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
-
       - name: Flutter dependencies
         run: |
           flutter clean
@@ -75,13 +71,21 @@ jobs:
           echo "Project files OK"
 
       - name: Generate launcher icons
-        run: dart run flutter_launcher_icons
+        run: |
+          dart run flutter_launcher_icons
 
       - name: Analyze Flutter project
-        run: flutter analyze
+        run: |
+          flutter analyze
 
       - name: Build release APK
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
+
+      - name: Check APK
+        run: |
+          echo "Searching for APK..."
+          find build -name "*.apk" -type f -print
 
       - name: Package APK
         run: |
