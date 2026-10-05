@@ -53,17 +53,26 @@ jobs:
 
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' "$GRADLE"
 
-          echo "Android compileSdk:"
+          echo "compileSdk:"
           grep "compileSdk" "$GRADLE"
 
-      - name: Flutter dependencies
-        run: flutter pub get
+          echo "Android SDK packages:"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Check generated assets
+      - name: Flutter dependencies
         run: |
+          flutter clean
+          rm -f pubspec.lock
+          flutter pub get
+
+      - name: Check project
+        run: |
+          test -f lib/main.dart
+          test -f pubspec.yaml
           test -f assets/icon.png
           test -f assets/icon_fg.png
-          echo "Icons OK"
+          echo "Project files OK"
 
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
@@ -76,10 +85,11 @@ jobs:
 
       - name: Package APK
         run: |
-          APK=$(find build -name "*.apk" -type f | head -1)
+          APK=$(find build/app/outputs/flutter-apk -name "*.apk" -type f | head -1)
 
           if [ -z "$APK" ]; then
             echo "ERROR: APK was not generated"
+            find build -name "*.apk" -type f || true
             exit 1
           fi
 
