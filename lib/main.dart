@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -23,6 +25,14 @@ class WahaAI extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Waha AI',
+      // واجهة عربية: لتظهر عناصر Material واتجاه النص من اليمين إلى اليسار.
+      locale: const Locale('ar'),
+      supportedLocales: const [Locale('ar'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -491,6 +501,10 @@ class AIService {
       throw Exception(
         'لم يرجع المزود أي نص.',
       );
+    } on TimeoutException {
+      throw Exception(
+        'انتهت مهلة الاتصال بالخادم. تحقق من اتصالك بالإنترنت ثم حاول مرة أخرى.',
+      );
     } on SocketException {
       throw Exception(
         'لا يوجد اتصال بالإنترنت.',
@@ -728,22 +742,20 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _pickFiles() async {
     try {
-      final result =
-          await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        withData: false,
-      );
+      // file_picker 13.x: FilePicker is a static class; the old
+      // `allowMultiple` / `withData` parameters were removed in 13.0.0.
+      final picked = await FilePicker.pickFiles();
 
-      if (result == null) return;
+      if (picked.isEmpty) return;
 
       final files = <AttachedFile>[];
 
-      for (final file in result.files) {
+      for (final file in picked) {
         files.add(
           AttachedFile(
             name: file.name,
             path: file.path ?? '',
-            size: file.size,
+            size: file.lengthSync() ?? 0,
             extension: file.extension ?? '',
           ),
         );
