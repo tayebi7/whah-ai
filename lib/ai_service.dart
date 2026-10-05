@@ -5,11 +5,6 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 class AIService {
-  final String endpoint;
-  final String apiKey;
-  final String model;
-  final String provider;
-
   AIService({
     required this.endpoint,
     required this.apiKey,
@@ -17,43 +12,13 @@ class AIService {
     this.provider = 'custom',
   });
 
-  static Future<String> sendMessage({
-    required Map<String, dynamic> settings,
-    required List<Map<String, String>> messages,
-  }) async {
-    final service = AIService(
-      endpoint: (settings['endpoint'] ?? '').toString(),
-      apiKey: (settings['apiKey'] ?? '').toString(),
-      model: (settings['model'] ?? '').toString(),
-      provider: (settings['provider'] ?? 'custom').toString(),
-    );
+  final String endpoint;
+  final String apiKey;
+  final String model;
+  final String provider;
 
-    return service.send(
-      messages: messages,
-      stream: false,
-    );
-  }
-
-  static Future<String> streamMessage({
-    required Map<String, dynamic> settings,
-    required List<Map<String, String>> messages,
-    required void Function(String text) onChunk,
-  }) async {
-    final service = AIService(
-      endpoint: (settings['endpoint'] ?? '').toString(),
-      apiKey: (settings['apiKey'] ?? '').toString(),
-      model: (settings['model'] ?? '').toString(),
-      provider: (settings['provider'] ?? 'custom').toString(),
-    );
-
-    return service.sendStream(
-      messages: messages,
-      onChunk: onChunk,
-    );
-  }
-
-  String _normalizeEndpoint(String value) {
-    var url = value.trim();
+  String get _url {
+    var url = endpoint.trim();
 
     while (url.endsWith('/')) {
       url = url.substring(0, url.length - 1);
@@ -78,7 +43,7 @@ class AIService {
     return '$url/v1/chat/completions';
   }
 
-  Map<String, String> _headers() {
+  Map<String, String> get _headers {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'application/json',
@@ -97,13 +62,11 @@ class AIService {
     return headers;
   }
 
-  Future<String> send({
+  Future<String> sendMessage({
     required List<Map<String, String>> messages,
     bool stream = false,
   }) async {
-    final url = _normalizeEndpoint(endpoint);
-
-    if (url.isEmpty) {
+    if (endpoint.trim().isEmpty) {
       throw Exception('لم يتم إدخال عنوان API');
     }
 
@@ -114,54 +77,43 @@ class AIService {
     final client = http.Client();
 
     try {
-      final request = http.Request(
-        'POST',
-        Uri.parse(url),
-      );
-
-      request.headers.addAll(_headers());
-
-      request.body = jsonEncode({
-        'model': model.trim(),
-        'messages': messages,
-        'stream': stream,
-      });
-
-      final response = await client.send(request);
-
-      final body = await response.stream.bytesToString();
+      final response = await client
+          .post(
+            Uri.parse(_url),
+            headers: _headers,
+            body: jsonEncode({
+              'model': model.trim(),
+              'messages': messages,
+              'stream': stream,
+            }),
+          )
+          .timeout(const Duration(seconds: 90));
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
-          'خطأ ${response.statusCode}: ${_extractError(body)}',
+          'خطأ ${response.statusCode}: ${_extractError(response.body)}',
         );
       }
 
-      return _extractContent(body);
+      return _extractContent(response.body);
     } on SocketException {
-      throw Exception(
-        'تعذر الاتصال بالخادم. تحقق من الإنترنت وعنوان API.',
-      );
+      throw Exception('تعذر الاتصال بالخادم. تحقق من الإنترنت.');
+    } on TimeoutException {
+      throw Exception('انتهت مهلة الاتصال بالخادم.');
     } on FormatException {
-      throw Exception(
-        'عنوان API غير صالح.',
-      );
+      throw Exception('عنوان API غير صالح.');
     } on http.ClientException catch (e) {
-      throw Exception(
-        'خطأ في الاتصال: ${e.message}',
-      );
+      throw Exception('خطأ في الاتصال: ${e.message}');
     } finally {
       client.close();
     }
   }
 
-  Future<String> sendStream({
+  Future<String> streamMessage({
     required List<Map<String, String>> messages,
     required void Function(String text) onChunk,
   }) async {
-    final url = _normalizeEndpoint(endpoint);
-
-    if (url.isEmpty) {
+    if (endpoint.trim().isEmpty) {
       throw Exception('لم يتم إدخال عنوان API');
     }
 
@@ -174,11 +126,10 @@ class AIService {
     try {
       final request = http.Request(
         'POST',
-        Uri.parse(url),
+        Uri.parse(_url),
       );
 
-      final headers = _headers();
-
+      final headers = Map<String, String>.from(_headers);
       headers['Accept'] = 'text/event-stream';
 
       request.headers.addAll(headers);
@@ -192,17 +143,18 @@ class AIService {
       final response = await client.send(request);
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        final error = await response.stream.bytesToString();
+        final errorBody = await response.stream.bytesToString();
 
         throw Exception(
-          'خطأ ${response.statusCode}: ${_extractError(error)}',
+          'خطأ ${response.statusCode}: ${_extractError(errorBody)}',
         );
       }
 
       final result = StringBuffer();
 
-      await for (final line
-          in response.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
         final value = line.trim();
 
         if (value.isEmpty) {
@@ -224,39 +176,38 @@ class AIService {
         }
 
         try {
-          final json = jsonDecode(data);
+          final decoded = jsonDecode(data);
+          final chunk = _extractDelta(decoded);
 
-          final text = _extractDelta(json);
-
-          if (text.isNotEmpty) {
-            result.write(text);
-            onChunk(text);
+          if (chunk.isNotEmpty) {
+            result.write(chunk);
+            onChunk(chunk);
           }
         } catch (_) {
-          // تجاهل أجزاء SSE غير الصالحة
+          // بعض الخوادم ترسل أسطر SSE غير JSON.
         }
       }
 
       return result.toString();
     } on SocketException {
-      throw Exception(
-        'تعذر الاتصال بالخادم. تحقق من الإنترنت.',
-      );
+      throw Exception('تعذر الاتصال بالخادم. تحقق من الإنترنت.');
+    } on TimeoutException {
+      throw Exception('انتهت مهلة الاتصال بالخادم.');
+    } on FormatException {
+      throw Exception('استجابة الخادم غير صالحة.');
     } on http.ClientException catch (e) {
-      throw Exception(
-        'خطأ في الاتصال: ${e.message}',
-      );
+      throw Exception('خطأ في الاتصال: ${e.message}');
     } finally {
       client.close();
     }
   }
 
-  String _extractDelta(dynamic json) {
-    if (json is! Map) {
+  String _extractDelta(dynamic data) {
+    if (data is! Map) {
       return '';
     }
 
-    final choices = json['choices'];
+    final choices = data['choices'];
 
     if (choices is! List || choices.isEmpty) {
       return '';
@@ -303,66 +254,68 @@ class AIService {
     }
 
     try {
-      final json = jsonDecode(raw);
+      final data = jsonDecode(raw);
 
-      if (json is Map) {
-        final choices = json['choices'];
+      if (data is! Map) {
+        return raw;
+      }
 
-        if (choices is List && choices.isNotEmpty) {
-          final first = choices.first;
+      final choices = data['choices'];
 
-          if (first is Map) {
-            final message = first['message'];
+      if (choices is List && choices.isNotEmpty) {
+        final first = choices.first;
 
-            if (message is Map) {
-              final content = message['content'];
+        if (first is Map) {
+          final message = first['message'];
 
-              if (content is String) {
-                return content;
-              }
-            }
+          if (message is Map) {
+            final content = message['content'];
 
-            final text = first['text'];
-
-            if (text is String) {
-              return text;
+            if (content is String) {
+              return content;
             }
           }
+
+          final text = first['text'];
+
+          if (text is String) {
+            return text;
+          }
         }
+      }
 
-        final candidates = json['candidates'];
+      final candidates = data['candidates'];
 
-        if (candidates is List && candidates.isNotEmpty) {
-          final candidate = candidates.first;
+      if (candidates is List && candidates.isNotEmpty) {
+        final candidate = candidates.first;
 
-          if (candidate is Map) {
-            final content = candidate['content'];
+        if (candidate is Map) {
+          final content = candidate['content'];
 
-            if (content is Map) {
-              final parts = content['parts'];
+          if (content is Map) {
+            final parts = content['parts'];
 
-              if (parts is List) {
-                final result = StringBuffer();
+            if (parts is List) {
+              final result = StringBuffer();
 
-                for (final part in parts) {
-                  if (part is Map && part['text'] is String) {
-                    result.write(part['text']);
-                  }
+              for (final part in parts) {
+                if (part is Map && part['text'] is String) {
+                  result.write(part['text']);
                 }
+              }
 
-                if (result.isNotEmpty) {
-                  return result.toString();
-                }
+              if (result.isNotEmpty) {
+                return result.toString();
               }
             }
           }
         }
       }
+
+      return _extractError(raw);
     } catch (_) {
       return raw;
     }
-
-    return _extractError(raw);
   }
 
   String _extractError(String raw) {
@@ -371,13 +324,64 @@ class AIService {
     }
 
     try {
-      final json = jsonDecode(raw);
+      final data = jsonDecode(raw);
 
-      if (json is Map) {
-        final error = json['error'];
+      if (data is Map) {
+        final error = data['error'];
 
         if (error is String) {
           return error;
         }
 
-        if (
+        if (error is Map) {
+          final message = error['message'];
+
+          if (message is String) {
+            return message;
+          }
+
+          final detail = error['detail'];
+
+          if (detail is String) {
+            return detail;
+          }
+        }
+
+        final message = data['message'];
+
+        if (message is String) {
+          return message;
+        }
+
+        final detail = data['detail'];
+
+        if (detail is String) {
+          return detail;
+        }
+      }
+    } catch (_) {}
+
+    if (raw.length > 1000) {
+      return raw.substring(0, 1000);
+    }
+
+    return raw;
+  }
+
+  Future<bool> testConnection() async {
+    try {
+      final result = await sendMessage(
+        messages: const [
+          {
+            'role': 'user',
+            'content': 'Reply with OK only.',
+          },
+        ],
+      );
+
+      return result.trim().isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+}
