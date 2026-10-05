@@ -11,6 +11,10 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # الترجمات واللغة العربية (تشمل دعم الاتجاه من اليمين إلى اليسار)
+  flutter_localizations:
+    sdk: flutter
+
   # الاتصال بالسيرفرات ومزودات الذكاء الاصطناعي
   http: ^1.2.2
 
