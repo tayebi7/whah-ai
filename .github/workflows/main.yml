@@ -24,20 +24,13 @@ jobs:
       - name: Generate platform folders
         run: flutter create --platforms=android --project-name whah_ai --org com.whah .
 
-      - name: Android config
+      - name: Allow internet + cleartext HTTP
         run: |
-          set -e
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          grep -q 'android.permission.INTERNET' "$MANIFEST" || \
-            sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$MANIFEST"
-          sed -i 's#<application#<application android:usesCleartextTraffic="true"#' "$MANIFEST"
-          sed -i 's#android:label="[^"]*"#android:label="whah ai"#' "$MANIFEST"
-          for f in android/app/build.gradle android/app/build.gradle.kts; do
-            [ -f "$f" ] || continue
-            sed -i 's/minSdkVersion .*/minSdkVersion 21/' "$f" || true
-            sed -i 's/minSdk = .*/minSdk = 21/' "$f" || true
-            sed -i 's/minSdk .*/minSdk 21/' "$f" || true
-          done
+          grep -q "android.permission.INTERNET" $MANIFEST || \
+            sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' $MANIFEST
+          sed -i 's#<application#<application android:usesCleartextTraffic="true"#' $MANIFEST
+          sed -i 's#android:label="[^"]*"#android:label="whah ai"#' $MANIFEST
 
       - name: Generate icon
         run: |
@@ -50,8 +43,9 @@ jobs:
 
       - name: Package APK
         run: |
-          find build -name "*.apk" -type f
+          find build -name "*.apk" -type f || true
           APK=$(find build -name "*.apk" -type f | head -1)
+          echo "APK=$APK"
           test -n "$APK"
           mkdir -p out
           cp "$APK" out/whah-ai.apk
