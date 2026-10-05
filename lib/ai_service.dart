@@ -5,6 +5,11 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 class AIService {
+  final String endpoint;
+  final String apiKey;
+  final String model;
+  final String provider;
+
   AIService({
     required this.endpoint,
     required this.apiKey,
@@ -12,29 +17,52 @@ class AIService {
     this.provider = 'custom',
   });
 
-  final String endpoint;
-  final String apiKey;
-  final String model;
-  final String provider;
+  static Future<String> sendMessage({
+    required Map<String, dynamic> settings,
+    required List<Map<String, String>> messages,
+  }) async {
+    final service = AIService(
+      endpoint: (settings['endpoint'] ?? '').toString(),
+      apiKey: (settings['apiKey'] ?? '').toString(),
+      model: (settings['model'] ?? '').toString(),
+      provider: (settings['provider'] ?? 'custom').toString(),
+    );
 
-  String normalizeEndpoint(String value) {
+    return service.send(
+      messages: messages,
+      stream: false,
+    );
+  }
+
+  static Future<String> streamMessage({
+    required Map<String, dynamic> settings,
+    required List<Map<String, String>> messages,
+    required void Function(String text) onChunk,
+  }) async {
+    final service = AIService(
+      endpoint: (settings['endpoint'] ?? '').toString(),
+      apiKey: (settings['apiKey'] ?? '').toString(),
+      model: (settings['model'] ?? '').toString(),
+      provider: (settings['provider'] ?? 'custom').toString(),
+    );
+
+    return service.sendStream(
+      messages: messages,
+      onChunk: onChunk,
+    );
+  }
+
+  String _normalizeEndpoint(String value) {
     var url = value.trim();
 
-    if (url.isEmpty) {
-      return url;
-    }
-
-    // Remove trailing slash.
     while (url.endsWith('/')) {
       url = url.substring(0, url.length - 1);
     }
 
-    // Already a chat completions endpoint.
     if (url.endsWith('/chat/completions')) {
       return url;
     }
 
-    // Common API base paths.
     if (url.endsWith('/v1')) {
       return '$url/chat/completions';
     }
@@ -47,21 +75,19 @@ class AIService {
       return '$url/v1/chat/completions';
     }
 
-    // Generic OpenAI-compatible endpoint.
     return '$url/v1/chat/completions';
   }
 
   Map<String, String> _headers() {
     final headers = <String, String>{
       'Content-Type': 'application/json',
-      'Accept': 'text/event-stream',
+      'Accept': 'application/json',
     };
 
     if (apiKey.trim().isNotEmpty) {
       headers['Authorization'] = 'Bearer ${apiKey.trim()}';
     }
 
-    // OpenRouter recommended headers.
     if (provider.toLowerCase() == 'openrouter' ||
         endpoint.toLowerCase().contains('openrouter.ai')) {
       headers['HTTP-Referer'] = 'https://github.com/tayebi7/whah-ai';
@@ -71,11 +97,11 @@ class AIService {
     return headers;
   }
 
-  Future<String> sendMessage({
+  Future<String> send({
     required List<Map<String, String>> messages,
-    bool stream = true,
+    bool stream = false,
   }) async {
-    final url = normalizeEndpoint(endpoint);
+    final url = _normalizeEndpoint(endpoint);
 
     if (url.isEmpty) {
       throw Exception('لم يتم إدخال عنوان API');
@@ -84,12 +110,6 @@ class AIService {
     if (model.trim().isEmpty) {
       throw Exception('لم يتم إدخال اسم النموذج');
     }
-
-    final body = jsonEncode({
-      'model': model.trim(),
-      'messages': messages,
-      'stream': stream,
-    });
 
     final client = http.Client();
 
@@ -100,36 +120,31 @@ class AIService {
       );
 
       request.headers.addAll(_headers());
-      request.body = body;
+
+      request.body = jsonEncode({
+        'model': model.trim(),
+        'messages': messages,
+        'stream': stream,
+      });
 
       final response = await client.send(request);
 
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        final errorBody = await response.stream.bytesToString();
+      final body = await response.stream.bytesToString();
 
+      if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
-          'خطأ ${response.statusCode}: ${_extractError(errorBody)}',
+          'خطأ ${response.statusCode}: ${_extractError(body)}',
         );
       }
 
-      if (!stream) {
-        final data = await response.stream.bytesToString();
-
-        return _extractContentFromJson(data);
-      }
-
-      return await _readStreamingResponse(response);
+      return _extractContent(body);
     } on SocketException {
       throw Exception(
         'تعذر الاتصال بالخادم. تحقق من الإنترنت وعنوان API.',
       );
-    } on TimeoutException {
+    } on FormatException {
       throw Exception(
-        'انتهت مهلة الاتصال بالخادم.',
-      );
-    } on FormatException catch (e) {
-      throw Exception(
-        'استجابة الخادم غير صالحة: ${e.message}',
+        'عنوان API غير صالح.',
       );
     } on http.ClientException catch (e) {
       throw Exception(
@@ -140,76 +155,100 @@ class AIService {
     }
   }
 
-  Future<String> _readStreamingResponse(
-    http.StreamedResponse response,
-  ) async {
-    final buffer = StringBuffer();
-    final completer = Completer<String>();
+  Future<String> sendStream({
+    required List<Map<String, String>> messages,
+    required void Function(String text) onChunk,
+  }) async {
+    final url = _normalizeEndpoint(endpoint);
 
-    StreamSubscription<String>? subscription;
+    if (url.isEmpty) {
+      throw Exception('لم يتم إدخال عنوان API');
+    }
 
-    subscription = response.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen(
-      (line) {
-        final text = line.trim();
+    if (model.trim().isEmpty) {
+      throw Exception('لم يتم إدخال اسم النموذج');
+    }
 
-        if (text.isEmpty) {
-          return;
+    final client = http.Client();
+
+    try {
+      final request = http.Request(
+        'POST',
+        Uri.parse(url),
+      );
+
+      final headers = _headers();
+
+      headers['Accept'] = 'text/event-stream';
+
+      request.headers.addAll(headers);
+
+      request.body = jsonEncode({
+        'model': model.trim(),
+        'messages': messages,
+        'stream': true,
+      });
+
+      final response = await client.send(request);
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        final error = await response.stream.bytesToString();
+
+        throw Exception(
+          'خطأ ${response.statusCode}: ${_extractError(error)}',
+        );
+      }
+
+      final result = StringBuffer();
+
+      await for (final line
+          in response.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+        final value = line.trim();
+
+        if (value.isEmpty) {
+          continue;
         }
 
-        if (text == 'data: [DONE]' ||
-            text == '[DONE]') {
-          if (!completer.isCompleted) {
-            completer.complete(buffer.toString());
-          }
-
-          subscription?.cancel();
-          return;
+        if (value == 'data: [DONE]' || value == '[DONE]') {
+          break;
         }
 
-        if (!text.startsWith('data:')) {
-          return;
+        if (!value.startsWith('data:')) {
+          continue;
         }
 
-        final data = text.substring(5).trim();
+        final data = value.substring(5).trim();
 
         if (data.isEmpty || data == '[DONE]') {
-          if (!completer.isCompleted) {
-            completer.complete(buffer.toString());
-          }
-
-          subscription?.cancel();
-          return;
+          break;
         }
 
         try {
           final json = jsonDecode(data);
 
-          final content = _extractDelta(json);
+          final text = _extractDelta(json);
 
-          if (content.isNotEmpty) {
-            buffer.write(content);
+          if (text.isNotEmpty) {
+            result.write(text);
+            onChunk(text);
           }
         } catch (_) {
-          // Some gateways may return non-standard SSE data.
+          // تجاهل أجزاء SSE غير الصالحة
         }
-      },
-      onError: (Object error, StackTrace stack) {
-        if (!completer.isCompleted) {
-          completer.completeError(error, stack);
-        }
-      },
-      onDone: () {
-        if (!completer.isCompleted) {
-          completer.complete(buffer.toString());
-        }
-      },
-      cancelOnError: true,
-    );
+      }
 
-    return completer.future;
+      return result.toString();
+    } on SocketException {
+      throw Exception(
+        'تعذر الاتصال بالخادم. تحقق من الإنترنت.',
+      );
+    } on http.ClientException catch (e) {
+      throw Exception(
+        'خطأ في الاتصال: ${e.message}',
+      );
+    } finally {
+      client.close();
+    }
   }
 
   String _extractDelta(dynamic json) {
@@ -229,7 +268,6 @@ class AIService {
       return '';
     }
 
-    // OpenAI / OpenRouter streaming format.
     final delta = first['delta'];
 
     if (delta is Map) {
@@ -240,7 +278,6 @@ class AIService {
       }
     }
 
-    // Some APIs return message.content.
     final message = first['message'];
 
     if (message is Map) {
@@ -251,7 +288,6 @@ class AIService {
       }
     }
 
-    // Some gateways use text directly.
     final text = first['text'];
 
     if (text is String) {
@@ -261,74 +297,69 @@ class AIService {
     return '';
   }
 
-  String _extractContentFromJson(String raw) {
+  String _extractContent(String raw) {
     if (raw.trim().isEmpty) {
       return '';
     }
 
-    dynamic json;
-
     try {
-      json = jsonDecode(raw);
-    } catch (_) {
-      return raw;
-    }
+      final json = jsonDecode(raw);
 
-    if (json is! Map) {
-      return raw;
-    }
+      if (json is Map) {
+        final choices = json['choices'];
 
-    final choices = json['choices'];
+        if (choices is List && choices.isNotEmpty) {
+          final first = choices.first;
 
-    if (choices is List && choices.isNotEmpty) {
-      final first = choices.first;
+          if (first is Map) {
+            final message = first['message'];
 
-      if (first is Map) {
-        final message = first['message'];
+            if (message is Map) {
+              final content = message['content'];
 
-        if (message is Map) {
-          final content = message['content'];
-
-          if (content is String) {
-            return content;
-          }
-        }
-
-        final text = first['text'];
-
-        if (text is String) {
-          return text;
-        }
-      }
-    }
-
-    // Gemini-like response compatibility.
-    final candidates = json['candidates'];
-
-    if (candidates is List && candidates.isNotEmpty) {
-      final candidate = candidates.first;
-
-      if (candidate is Map) {
-        final content = candidate['content'];
-
-        if (content is Map) {
-          final parts = content['parts'];
-
-          if (parts is List) {
-            final result = StringBuffer();
-
-            for (final part in parts) {
-              if (part is Map && part['text'] is String) {
-                result.write(part['text']);
+              if (content is String) {
+                return content;
               }
             }
 
-            if (result.isNotEmpty) {
-              return result.toString();
+            final text = first['text'];
+
+            if (text is String) {
+              return text;
+            }
+          }
+        }
+
+        final candidates = json['candidates'];
+
+        if (candidates is List && candidates.isNotEmpty) {
+          final candidate = candidates.first;
+
+          if (candidate is Map) {
+            final content = candidate['content'];
+
+            if (content is Map) {
+              final parts = content['parts'];
+
+              if (parts is List) {
+                final result = StringBuffer();
+
+                for (final part in parts) {
+                  if (part is Map && part['text'] is String) {
+                    result.write(part['text']);
+                  }
+                }
+
+                if (result.isNotEmpty) {
+                  return result.toString();
+                }
+              }
             }
           }
         }
       }
+    } catch (_) {
+      return raw;
     }
 
     return _extractError(raw);
@@ -349,58 +380,4 @@ class AIService {
           return error;
         }
 
-        if (error is Map) {
-          final message = error['message'];
-
-          if (message is String) {
-            return message;
-          }
-
-          final detail = error['detail'];
-
-          if (detail is String) {
-            return detail;
-          }
-        }
-
-        final message = json['message'];
-
-        if (message is String) {
-          return message;
-        }
-
-        final detail = json['detail'];
-
-        if (detail is String) {
-          return detail;
-        }
-      }
-    } catch (_) {
-      // Return raw text below.
-    }
-
-    if (raw.length > 1000) {
-      return raw.substring(0, 1000);
-    }
-
-    return raw;
-  }
-
-  Future<bool> testConnection() async {
-    try {
-      final result = await sendMessage(
-        messages: const [
-          {
-            'role': 'user',
-            'content': 'Reply with OK only.',
-          },
-        ],
-        stream: false,
-      );
-
-      return result.trim().isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
-}
+        if (
