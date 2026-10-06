@@ -42,6 +42,14 @@ jobs:
             echo "android/ already exists"
           fi
 
+      - name: Add INTERNET permission to release manifest
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>|' "$MANIFEST"
+          sed -i 's|android:name="${applicationName}"|android:name="${applicationName}"\n        android:usesCleartextTraffic="true"|' "$MANIFEST"
+          echo "----- Manifest after patch -----"
+          cat "$MANIFEST"
+
       - name: Get dependencies
         run: flutter pub get
 
