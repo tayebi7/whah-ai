@@ -20,7 +20,11 @@ class AIService {
 
   static final http.Client _sharedClient = http.Client();
 
-  String get resolvedUrl => _url;
+  bool get _isPollinations {
+    final p = provider.toLowerCase();
+    final e = endpoint.toLowerCase();
+    return p.contains('pollinations') || e.contains('pollinations.ai');
+  }
 
   String get _url {
     var url = endpoint.trim().replaceAll(RegExp(r'\s+'), '');
@@ -47,6 +51,14 @@ class AIService {
         return '$url/v1/chat/completions';
       }
       return '$url/api/v1/chat/completions';
+    }
+
+    if (url.contains('pollinations.ai')) {
+      // Pollinations OpenAI-compatible
+      if (url.contains('/v1')) {
+        return '$url/chat/completions';
+      }
+      return 'https://text.pollinations.ai/openai';
     }
 
     if (url.endsWith('/v1') || url.endsWith('/api/v1')) {
@@ -81,19 +93,22 @@ class AIService {
       headers['X-Title'] = 'WHAH AI';
     }
 
-    if (p.contains('يدوي') || p.contains('custom')) {
-      headers['Accept'] = 'application/json, text/event-stream';
-    }
-
     return headers;
   }
 
   void _validate() {
-    if (endpoint.trim().isEmpty) {
-      throw Exception('لم يتم إدخال عنوان API. افتح الإعدادات وأدخل الرابط.');
+    if (endpoint.trim().isEmpty && !_isPollinations) {
+      throw Exception('لم يتم إدخال عنوان API.');
     }
-    if (model.trim().isEmpty) {
+    if (model.trim().isEmpty && !_isPollinations) {
       throw Exception('لم يتم إدخال اسم النموذج.');
+    }
+    // Pollinations و المزودون بدون مفتاح: لا نفرض API Key
+    final needsKey = !_isPollinations &&
+        !provider.contains('بدون مفتاح') &&
+        !provider.toLowerCase().contains('no key');
+    if (needsKey && apiKey.trim().isEmpty) {
+      // لا نرمي هنا دائماً — بعض السيرفرات المحلية بلا مفتاح
     }
   }
 
@@ -105,8 +120,14 @@ class AIService {
   }) async {
     _validate();
 
+    // مسار Pollinations البسيط بدون مفتاح
+    if (_isPollinations && endpoint.contains('text.pollinations.ai') &&
+        !endpoint.contains('openai')) {
+      return _sendPollinationsSimple(messages, timeout);
+    }
+
     final body = <String, dynamic>{
-      'model': model.trim(),
+      'model': model.trim().isEmpty ? 'openai' : model.trim(),
       'messages': messages,
       'stream': false,
       'temperature': temperature,
@@ -115,18 +136,21 @@ class AIService {
       body['max_tokens'] = maxTokens;
     }
 
+    final url = _url;
+
     try {
       final response = await _sharedClient
           .post(
-            Uri.parse(_url),
+            Uri.parse(url),
             headers: _headers,
             body: jsonEncode(body),
           )
           .timeout(timeout);
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        final err = _extractError(response.body);
         throw Exception(
-          'خطأ ${response.statusCode} على \( _url\n \){_extractError(response.body)}',
+          'خطأ ${response.statusCode}\nالرابط: $url\n$err',
         );
       }
 
@@ -140,9 +164,35 @@ class AIService {
     } on TimeoutException {
       throw Exception('انتهت مهلة الاتصال (${timeout.inSeconds} ث).');
     } on FormatException {
-      throw Exception('عنوان API غير صالح: $_url');
+      throw Exception('عنوان API غير صالح: $url');
     } on http.ClientException catch (e) {
       throw Exception('خطأ في الاتصال: ${e.message}');
+    }
+  }
+
+  /// Pollinations نصي مجاني بدون API Key
+  Future<String> _sendPollinationsSimple(
+    List<Map<String, dynamic>> messages,
+    Duration timeout,
+  ) async {
+    final last = messages.isNotEmpty ? messages.last['content']?.toString() ?? '' : '';
+    final prompt = last.isEmpty ? 'Hello' : last;
+    final uri = Uri.parse(
+      'https://text.pollinations.ai/${Uri.encodeComponent(prompt)}',
+    );
+
+    try {
+      final response = await _sharedClient.get(uri).timeout(timeout);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('خطأ ${response.statusCode} من Pollinations');
+      }
+      final text = response.body.trim();
+      if (text.isEmpty) throw Exception('استجابة فارغة');
+      return text;
+    } on SocketException {
+      throw Exception('تعذر الاتصال بـ Pollinations.');
+    } on TimeoutException {
+      throw Exception('انتهت مهلة Pollinations.');
     }
   }
 
@@ -152,6 +202,13 @@ class AIService {
     double temperature = 0.7,
     Duration timeout = const Duration(seconds: 90),
   }) async {
+    // Pollinations: لا بث — نرسل دفعة واحدة
+    if (_isPollinations) {
+      final result = await sendMessage(messages: messages, timeout: timeout);
+      onChunk(result);
+      return result;
+    }
+
     _validate();
 
     final request = http.Request('POST', Uri.parse(_url));
@@ -171,7 +228,7 @@ class AIService {
       if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
         final errorBody = await streamed.stream.bytesToString();
         throw Exception(
-          'خطأ ${streamed.statusCode} على \( _url\n \){_extractError(errorBody)}',
+          'خطأ ${streamed.statusCode}\nالرابط: $_url\n${_extractError(errorBody)}',
         );
       }
 
@@ -220,7 +277,7 @@ class AIService {
   }) async {
     var gotStreamData = false;
 
-    if (preferStream) {
+    if (preferStream && !_isPollinations) {
       try {
         final streamed = await streamMessage(
           messages: messages,
@@ -233,9 +290,7 @@ class AIService {
         );
         if (streamed.trim().isNotEmpty) return streamed;
       } catch (_) {
-        if (gotStreamData) {
-          return '';
-        }
+        if (gotStreamData) return '';
       }
     }
 
@@ -256,7 +311,7 @@ class AIService {
         ],
         maxTokens: 5,
         temperature: 0,
-        timeout: const Duration(seconds: 12),
+        timeout: const Duration(seconds: 15),
       );
       if (result.trim().isEmpty) return 'استجابة فارغة من الخادم';
       return null;
@@ -318,26 +373,6 @@ class AIService {
         }
       }
 
-      final candidates = data['candidates'];
-      if (candidates is List && candidates.isNotEmpty) {
-        final candidate = candidates.first;
-        if (candidate is Map) {
-          final content = candidate['content'];
-          if (content is Map) {
-            final parts = content['parts'];
-            if (parts is List) {
-              final result = StringBuffer();
-              for (final part in parts) {
-                if (part is Map && part['text'] is String) {
-                  result.write(part['text']);
-                }
-              }
-              if (result.isNotEmpty) return result.toString();
-            }
-          }
-        }
-      }
-
       final text = data['text'] ?? data['output'] ?? data['response'];
       if (text is String && text.isNotEmpty) return text;
       return _extractError(raw);
@@ -356,12 +391,14 @@ class AIService {
         if (error is Map) {
           if (error['message'] is String) return error['message'] as String;
           if (error['detail'] is String) return error['detail'] as String;
+          if (error['code'] != null) {
+            return '${error['code']}: ${error['message'] ?? error}';
+          }
         }
         if (data['message'] is String) return data['message'] as String;
-        if (data['detail'] is String) return data['detail'] as String;
       }
     } catch (_) {}
-    if (raw.length > 600) return '${raw.substring(0, 600)}...';
+    if (raw.length > 400) return '${raw.substring(0, 400)}...';
     return raw;
   }
 }
