@@ -227,10 +227,10 @@ class WahaSettings {
   String systemPrompt;
 
   WahaSettings({
-    this.provider = 'OpenRouter (مجاني)',
-    this.endpoint = 'https://openrouter.ai/api/v1',
+    this.provider = 'مجاني بدون مفتاح (Pollinations)',
+    this.endpoint = 'https://text.pollinations.ai',
     this.apiKey = '',
-    this.model = 'openrouter/free',
+    this.model = 'openai',
     this.streamEnabled = true,
     this.systemPrompt =
         'أنت مساعد ذكي اسمه WHAH AI. أجب بالعربية بشكل واضح ومفيد. يمكنك كتابة كود، تحليل بيانات، وتحويل مستندات.',
@@ -567,9 +567,11 @@ class _ChatPageState extends State<ChatPage> {
     if (_isLoading) return;
 
     // تحقق من الإعدادات
-    if (_settings.apiKey.trim().isEmpty &&
-        !_settings.provider.contains('يدوي') &&
-        _settings.provider != 'Custom') {
+    final noKeyOk = _settings.provider.contains('بدون مفتاح') ||
+        _settings.provider.contains('Pollinations') ||
+        _settings.provider.contains('يدوي') ||
+        _settings.provider == 'Custom';
+    if (_settings.apiKey.trim().isEmpty && !noKeyOk) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('أدخل مفتاح API من الإعدادات أولاً'),
@@ -1379,28 +1381,32 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _testResult;
 
   static const _providers = {
-    // —— مجاني / طبقة مجانية ——
-    'OpenRouter (مجاني)': {
-      'endpoint': 'https://openrouter.ai/api/v1',
-      'model': 'openrouter/free',
+    // —— بدون مفتاح API ——
+    'مجاني بدون مفتاح (Pollinations)': {
+      'endpoint': 'https://text.pollinations.ai',
+      'model': 'openai',
     },
+    // —— مجاني بمفتاح مجاني ——
     'Groq (مجاني)': {
       'endpoint': 'https://api.groq.com/openai/v1',
       'model': 'llama-3.3-70b-versatile',
+    },
+    'OpenRouter (مجاني)': {
+      'endpoint': 'https://openrouter.ai/api/v1',
+      'model': 'openrouter/free',
     },
     'Google Gemini (مجاني)': {
       'endpoint': 'https://generativelanguage.googleapis.com/v1beta/openai',
       'model': 'gemini-2.0-flash',
     },
-    'DeepSeek (رخيص)': {
+    'DeepSeek': {
       'endpoint': 'https://api.deepseek.com/v1',
       'model': 'deepseek-chat',
     },
-    'Mistral (تجريبي)': {
+    'Mistral': {
       'endpoint': 'https://api.mistral.ai/v1',
       'model': 'mistral-small-latest',
     },
-    // —— مدفوع / عام ——
     'OpenAI': {
       'endpoint': 'https://api.openai.com/v1',
       'model': 'gpt-4o-mini',
@@ -1409,15 +1415,6 @@ class _SettingsPageState extends State<SettingsPage> {
       'endpoint': 'https://openrouter.ai/api/v1',
       'model': 'openai/gpt-4o-mini',
     },
-    'NVIDIA NIM': {
-      'endpoint': 'https://integrate.api.nvidia.com/v1',
-      'model': 'meta/llama-3.1-8b-instruct',
-    },
-    'Together': {
-      'endpoint': 'https://api.together.xyz/v1',
-      'model': 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
-    },
-    // إدخال يدوي كامل
     'يدوي (Custom)': {
       'endpoint': '',
       'model': '',
@@ -1452,13 +1449,20 @@ class _SettingsPageState extends State<SettingsPage> {
       final preset = _providers[provider];
       if (preset != null) {
         if (preset['endpoint']!.isNotEmpty) {
-          _endpointController.text = preset['endpoint']!;
+          _endpointController.value = TextEditingValue(
+            text: preset['endpoint']!,
+            selection: TextSelection.collapsed(offset: preset['endpoint']!.length),
+          );
         }
-        if (preset['model']!.isNotEmpty &&
-            _modelController.text.trim().isEmpty) {
-          _modelController.text = preset['model']!;
-        } else if (preset['model']!.isNotEmpty) {
-          _modelController.text = preset['model']!;
+        if (preset['model']!.isNotEmpty) {
+          _modelController.value = TextEditingValue(
+            text: preset['model']!,
+            selection: TextSelection.collapsed(offset: preset['model']!.length),
+          );
+        }
+        // مزود بدون مفتاح: امسح المفتاح
+        if (provider.contains('بدون مفتاح') || provider.contains('Pollinations')) {
+          _apiKeyController.clear();
         }
       }
     });
@@ -1488,7 +1492,11 @@ class _SettingsPageState extends State<SettingsPage> {
       });
       return;
     }
-    if (apiKey.isEmpty && !_provider.contains('يدوي') && _provider != 'Custom') {
+    final noKeyOk = _provider.contains('بدون مفتاح') ||
+        _provider.contains('Pollinations') ||
+        _provider.contains('يدوي') ||
+        _provider == 'Custom';
+    if (apiKey.isEmpty && !noKeyOk) {
       setState(() {
         _testResult = '❌ أدخل مفتاح API أولاً';
         _testing = false;
@@ -1676,9 +1684,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'مزودون مجانيون: OpenRouter Free و Groq و Gemini.\n'
-                    'للإدخال اليدوي: اختر «يدوي (Custom)» وضع الرابط والمفتاح والنموذج.\n'
-                    'حقول الرابط والمفتاح تُكتب من اليسار لليمين.',
+                    'مجاني بدون مفتاح: اختر «مجاني بدون مفتاح (Pollinations)».\n'
+                    'مجاني بمفتاح: Groq أو Gemini أو OpenRouter.\n'
+                    'اكتب الرابط والنموذج من اليسار لليمين.',
                     style: TextStyle(fontSize: 13, height: 1.4),
                   ),
                 ),
