@@ -628,20 +628,34 @@ class _ChatPageState extends State<ChatPage> {
         });
       }
 
+      // جرب البث أولاً، وعند أي فشل استخدم الطلب العادي (أوثق على الموبايل)
+      var usedStream = false;
       if (_settings.streamEnabled) {
-        await service.streamMessage(
-          messages: messages,
-          onChunk: (chunk) {
-            if (!mounted) return;
-            setState(() {
-              assistantMessage.content += chunk;
-            });
-            _scrollToBottom();
-          },
-        );
+        try {
+          await service.streamMessage(
+            messages: messages,
+            onChunk: (chunk) {
+              if (!mounted) return;
+              usedStream = true;
+              setState(() {
+                assistantMessage.content += chunk;
+              });
+              _scrollToBottom();
+            },
+          );
+        } catch (streamError) {
+          // فشل البث — نجرب الطلب العادي
+          if (assistantMessage.content.trim().isEmpty) {
+            final result = await service.sendMessage(messages: messages);
+            if (mounted) {
+              setState(() => assistantMessage.content = result);
+            }
+          } else {
+            rethrow;
+          }
+        }
 
-        // fallback إذا لم يصل أي جزء
-        if (assistantMessage.content.trim().isEmpty) {
+        if (assistantMessage.content.trim().isEmpty && !usedStream) {
           final result = await service.sendMessage(messages: messages);
           if (mounted) {
             setState(() => assistantMessage.content = result);
@@ -657,7 +671,15 @@ class _ChatPageState extends State<ChatPage> {
       if (mounted) {
         setState(() {
           assistantMessage.content =
-              '⚠️ حدث خطأ أثناء الاتصال:\n\n$e\n\nتحقق من:\n• مفتاح API\n• عنوان الـ Endpoint\n• اسم النموذج\n• اتصال الإنترنت';
+              '⚠️ حدث خطأ أثناء الاتصال:\n\n$e\n\n'
+              'تحقق من:\n'
+              '• مفتاح API صحيح وغير منتهٍ\n'
+              '• Endpoint: ${_settings.endpoint}\n'
+              '• النموذج: ${_settings.model}\n'
+              '• المزود: ${_settings.provider}\n'
+              '• اتصال الإنترنت مفعّل للتطبيق\n\n'
+              'نصيحة: جرّب OpenRouter مع نموذج openai/gpt-4o-mini '
+              'واضغط «اختبار الاتصال» في الإعدادات.';
         });
       }
     } finally {
@@ -1181,11 +1203,6 @@ class _ChatPageState extends State<ChatPage> {
             onPressed: _newChat,
             icon: const Icon(Icons.add_comment_outlined),
           ),
-          IconButton(
-            tooltip: 'الإعدادات',
-            onPressed: _openSettings,
-            icon: const Icon(Icons.settings_outlined),
-          ),
         ],
       ),
       drawer: _buildDrawer(),
@@ -1455,19 +1472,45 @@ class _SettingsPageState extends State<SettingsPage> {
       _testResult = null;
     });
 
+    final endpoint = _endpointController.text.trim();
+    final apiKey = _apiKeyController.text.trim();
+    final model = _modelController.text.trim();
+
+    if (endpoint.isEmpty) {
+      setState(() {
+        _testResult = '❌ أدخل عنوان API أولاً';
+        _testing = false;
+      });
+      return;
+    }
+    if (model.isEmpty) {
+      setState(() {
+        _testResult = '❌ أدخل اسم النموذج أولاً';
+        _testing = false;
+      });
+      return;
+    }
+    if (apiKey.isEmpty && _provider != 'Gateway' && _provider != 'Custom') {
+      setState(() {
+        _testResult = '❌ أدخل مفتاح API أولاً';
+        _testing = false;
+      });
+      return;
+    }
+
     final service = AIService(
-      endpoint: _endpointController.text.trim(),
-      apiKey: _apiKeyController.text.trim(),
-      model: _modelController.text.trim(),
+      endpoint: endpoint,
+      apiKey: apiKey,
+      model: model,
       provider: _provider,
     );
 
     try {
-      final ok = await service.testConnection();
+      final err = await service.testConnectionDetailed();
       setState(() {
-        _testResult = ok
-            ? '✅ الاتصال ناجح'
-            : '❌ فشل الاتصال — تحقق من المفتاح والنموذج';
+        _testResult = err == null
+            ? '✅ الاتصال ناجح — يمكنك الحفظ والبدء'
+            : '❌ فشل الاتصال:\n$err';
       });
     } catch (e) {
       setState(() {
@@ -1576,7 +1619,7 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('البث المباشر (Streaming)'),
             subtitle: const Text('استجابة فورية مثل ChatGPT و Claude'),
             value: _streamEnabled,
-            activeColor: AppColors.primary,
+            activeThumbColor: AppColors.primary,
             onChanged: (v) => setState(() => _streamEnabled = v),
           ),
           const SizedBox(height: 8),
