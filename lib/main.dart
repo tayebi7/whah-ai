@@ -227,10 +227,10 @@ class WahaSettings {
   String systemPrompt;
 
   WahaSettings({
-    this.provider = 'OpenRouter',
+    this.provider = 'OpenRouter (مجاني)',
     this.endpoint = 'https://openrouter.ai/api/v1',
     this.apiKey = '',
-    this.model = 'openai/gpt-4o-mini',
+    this.model = 'openrouter/free',
     this.streamEnabled = true,
     this.systemPrompt =
         'أنت مساعد ذكي اسمه WHAH AI. أجب بالعربية بشكل واضح ومفيد. يمكنك كتابة كود، تحليل بيانات، وتحويل مستندات.',
@@ -247,11 +247,11 @@ class WahaSettings {
 
   factory WahaSettings.fromJson(Map<String, dynamic> json) {
     return WahaSettings(
-      provider: json['provider']?.toString() ?? 'OpenRouter',
+      provider: json['provider']?.toString() ?? 'OpenRouter (مجاني)',
       endpoint: json['endpoint']?.toString() ??
           'https://openrouter.ai/api/v1',
       apiKey: json['apiKey']?.toString() ?? '',
-      model: json['model']?.toString() ?? 'openai/gpt-4o-mini',
+      model: json['model']?.toString() ?? 'openrouter/free',
       streamEnabled: json['streamEnabled'] as bool? ?? true,
       systemPrompt: json['systemPrompt']?.toString() ??
           'أنت مساعد ذكي اسمه WHAH AI. أجب بالعربية بشكل واضح ومفيد.',
@@ -271,9 +271,19 @@ class LocalStorage {
     final raw = prefs.getString(settingsKey);
     if (raw == null || raw.isEmpty) return WahaSettings();
     try {
-      return WahaSettings.fromJson(
-        Map<String, dynamic>.from(jsonDecode(raw)),
-      );
+      final map = Map<String, dynamic>.from(jsonDecode(raw));
+      // ترحيل الأسماء القديمة
+      final p = map['provider']?.toString() ?? '';
+      if (p == 'Gateway' || p == 'Custom') {
+        map['provider'] = 'يدوي (Custom)';
+      }
+      if (p == 'OpenRouter') {
+        map['provider'] = 'OpenRouter (مجاني)';
+      }
+      if (p == 'Groq') {
+        map['provider'] = 'Groq (مجاني)';
+      }
+      return WahaSettings.fromJson(map);
     } catch (_) {
       return WahaSettings();
     }
@@ -558,8 +568,8 @@ class _ChatPageState extends State<ChatPage> {
 
     // تحقق من الإعدادات
     if (_settings.apiKey.trim().isEmpty &&
-        _settings.provider != 'Custom' &&
-        _settings.provider != 'Gateway') {
+        !_settings.provider.contains('يدوي') &&
+        _settings.provider != 'Custom') {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('أدخل مفتاح API من الإعدادات أولاً'),
@@ -628,45 +638,18 @@ class _ChatPageState extends State<ChatPage> {
         });
       }
 
-      // جرب البث أولاً، وعند أي فشل استخدم الطلب العادي (أوثق على الموبايل)
-      var usedStream = false;
-      if (_settings.streamEnabled) {
-        try {
-          await service.streamMessage(
-            messages: messages,
-            onChunk: (chunk) {
-              if (!mounted) return;
-              usedStream = true;
-              setState(() {
-                assistantMessage.content += chunk;
-              });
-              _scrollToBottom();
-            },
-          );
-        } catch (streamError) {
-          // فشل البث — نجرب الطلب العادي
-          if (assistantMessage.content.trim().isEmpty) {
-            final result = await service.sendMessage(messages: messages);
-            if (mounted) {
-              setState(() => assistantMessage.content = result);
-            }
-          } else {
-            rethrow;
-          }
-        }
-
-        if (assistantMessage.content.trim().isEmpty && !usedStream) {
-          final result = await service.sendMessage(messages: messages);
-          if (mounted) {
-            setState(() => assistantMessage.content = result);
-          }
-        }
-      } else {
-        final result = await service.sendMessage(messages: messages);
-        if (mounted) {
-          setState(() => assistantMessage.content = result);
-        }
-      }
+      // مسار سريع: بث فوري مع سقوط تلقائي للطلب العادي
+      await service.sendSmart(
+        messages: messages,
+        preferStream: _settings.streamEnabled,
+        onChunk: (chunk) {
+          if (!mounted || chunk.isEmpty) return;
+          setState(() {
+            assistantMessage.content += chunk;
+          });
+          _scrollToBottom();
+        },
+      );
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -1396,17 +1379,35 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _testResult;
 
   static const _providers = {
-    'OpenRouter': {
+    // —— مجاني / طبقة مجانية ——
+    'OpenRouter (مجاني)': {
       'endpoint': 'https://openrouter.ai/api/v1',
-      'model': 'openai/gpt-4o-mini',
+      'model': 'openrouter/free',
     },
+    'Groq (مجاني)': {
+      'endpoint': 'https://api.groq.com/openai/v1',
+      'model': 'llama-3.3-70b-versatile',
+    },
+    'Google Gemini (مجاني)': {
+      'endpoint': 'https://generativelanguage.googleapis.com/v1beta/openai',
+      'model': 'gemini-2.0-flash',
+    },
+    'DeepSeek (رخيص)': {
+      'endpoint': 'https://api.deepseek.com/v1',
+      'model': 'deepseek-chat',
+    },
+    'Mistral (تجريبي)': {
+      'endpoint': 'https://api.mistral.ai/v1',
+      'model': 'mistral-small-latest',
+    },
+    // —— مدفوع / عام ——
     'OpenAI': {
       'endpoint': 'https://api.openai.com/v1',
       'model': 'gpt-4o-mini',
     },
-    'Groq': {
-      'endpoint': 'https://api.groq.com/openai/v1',
-      'model': 'llama-3.3-70b-versatile',
+    'OpenRouter': {
+      'endpoint': 'https://openrouter.ai/api/v1',
+      'model': 'openai/gpt-4o-mini',
     },
     'NVIDIA NIM': {
       'endpoint': 'https://integrate.api.nvidia.com/v1',
@@ -1416,11 +1417,8 @@ class _SettingsPageState extends State<SettingsPage> {
       'endpoint': 'https://api.together.xyz/v1',
       'model': 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
     },
-    'Gateway': {
-      'endpoint': '',
-      'model': '',
-    },
-    'Custom': {
+    // إدخال يدوي كامل
+    'يدوي (Custom)': {
       'endpoint': '',
       'model': '',
     },
@@ -1490,7 +1488,7 @@ class _SettingsPageState extends State<SettingsPage> {
       });
       return;
     }
-    if (apiKey.isEmpty && _provider != 'Gateway' && _provider != 'Custom') {
+    if (apiKey.isEmpty && !_provider.contains('يدوي') && _provider != 'Custom') {
       setState(() {
         _testResult = '❌ أدخل مفتاح API أولاً';
         _testing = false;
@@ -1574,21 +1572,35 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 16),
           TextField(
             controller: _endpointController,
+            textDirection: TextDirection.ltr,
+            textAlign: TextAlign.left,
+            keyboardType: TextInputType.url,
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              letterSpacing: 0,
+            ),
             decoration: const InputDecoration(
-              labelText: 'API Endpoint (Base أو كامل)',
+              labelText: 'API Endpoint (رابط المزود)',
               hintText: 'https://openrouter.ai/api/v1',
+              hintTextDirection: TextDirection.ltr,
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.link),
               helperText:
-                  'يمكنك وضع الرابط الأساسي فقط، سيُضاف /chat/completions تلقائياً',
+                  'اكتب الرابط من اليسار لليمين. مثال: https://openrouter.ai/api/v1',
+              helperMaxLines: 2,
             ),
           ),
           const SizedBox(height: 14),
           TextField(
             controller: _apiKeyController,
             obscureText: true,
+            textDirection: TextDirection.ltr,
+            textAlign: TextAlign.left,
+            style: const TextStyle(fontFamily: 'monospace'),
             decoration: const InputDecoration(
               labelText: 'API Key',
+              hintText: 'sk-or-v1-...',
+              hintTextDirection: TextDirection.ltr,
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.key_outlined),
             ),
@@ -1596,9 +1608,13 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 14),
           TextField(
             controller: _modelController,
+            textDirection: TextDirection.ltr,
+            textAlign: TextAlign.left,
+            style: const TextStyle(fontFamily: 'monospace'),
             decoration: const InputDecoration(
               labelText: 'Model',
-              hintText: 'openai/gpt-4o-mini',
+              hintText: 'openrouter/free',
+              hintTextDirection: TextDirection.ltr,
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.smart_toy_outlined),
             ),
@@ -1660,8 +1676,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'يدعم OpenRouter و OpenAI و Groq و NVIDIA و Together وأي Gateway متوافق مع OpenAI API.\n'
-                    'للـ Gateway أو Custom: ضع الرابط الأساسي أو الكامل يدوياً.',
+                    'مزودون مجانيون: OpenRouter Free و Groq و Gemini.\n'
+                    'للإدخال اليدوي: اختر «يدوي (Custom)» وضع الرابط والمفتاح والنموذج.\n'
+                    'حقول الرابط والمفتاح تُكتب من اليسار لليمين.',
                     style: TextStyle(fontSize: 13, height: 1.4),
                   ),
                 ),
