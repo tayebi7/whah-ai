@@ -22,13 +22,24 @@ class AIService {
   String get _url {
     var url = endpoint.trim();
 
+    // إزالة مسافات وأخطاء لصق شائعة
+    url = url.replaceAll(RegExp(r'\s+'), '');
+
     while (url.endsWith('/')) {
       url = url.substring(0, url.length - 1);
     }
 
     // إذا كان الرابط كاملاً بالفعل
-    if (url.endsWith('/chat/completions')) {
+    if (url.contains('/chat/completions')) {
       return url;
+    }
+
+    // OpenRouter base
+    if (url.contains('openrouter.ai') && !url.endsWith('/v1')) {
+      if (url.endsWith('/api')) {
+        return '$url/v1/chat/completions';
+      }
+      return '$url/api/v1/chat/completions';
     }
 
     // حالات شائعة
@@ -108,7 +119,7 @@ class AIService {
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception(
-          'خطأ ${response.statusCode}: ${_extractError(response.body)}',
+          'خطأ ${response.statusCode} على $_url\n${_extractError(response.body)}',
         );
       }
 
@@ -161,7 +172,7 @@ class AIService {
       if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
         final errorBody = await streamed.stream.bytesToString();
         throw Exception(
-          'خطأ ${streamed.statusCode}: ${_extractError(errorBody)}',
+          'خطأ ${streamed.statusCode} على $_url\n${_extractError(errorBody)}',
         );
       }
 
@@ -341,18 +352,26 @@ class AIService {
     return raw;
   }
 
-  /// اختبار الاتصال السريع
-  Future<bool> testConnection() async {
+  /// اختبار الاتصال السريع — يرجع null عند النجاح أو رسالة الخطأ
+  Future<String?> testConnectionDetailed() async {
     try {
       final result = await sendMessage(
         messages: const [
           {'role': 'user', 'content': 'Reply with OK only.'},
         ],
-        maxTokens: 10,
+        maxTokens: 16,
       );
-      return result.trim().isNotEmpty;
-    } catch (_) {
-      return false;
+      if (result.trim().isEmpty) {
+        return 'استجابة فارغة من الخادم';
+      }
+      return null; // نجاح
+    } catch (e) {
+      return e.toString();
     }
+  }
+
+  Future<bool> testConnection() async {
+    final err = await testConnectionDetailed();
+    return err == null;
   }
 }
