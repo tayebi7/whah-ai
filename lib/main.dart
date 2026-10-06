@@ -218,72 +218,191 @@ class ChatHistory {
   }
 }
 
+class ProviderConfig {
+  String name;
+  String endpoint;
+  String apiKey;
+  String model;
+
+  ProviderConfig({
+    required this.name,
+    required this.endpoint,
+    this.apiKey = '',
+    this.model = '',
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'endpoint': endpoint,
+        'apiKey': apiKey,
+        'model': model,
+      };
+
+  factory ProviderConfig.fromJson(Map<String, dynamic> json) {
+    return ProviderConfig(
+      name: json['name']?.toString() ?? '',
+      endpoint: json['endpoint']?.toString() ?? '',
+      apiKey: json['apiKey']?.toString() ?? '',
+      model: json['model']?.toString() ?? '',
+    );
+  }
+}
+
 class WahaSettings {
+  /// single = مزود واحد | gateway = تبديل تلقائي
+  String mode;
   String provider;
   String endpoint;
   String apiKey;
   String model;
   bool streamEnabled;
   String systemPrompt;
+  /// مزودون يدويون محفوظون بالاسم
+  List<ProviderConfig> customProviders;
+  /// مفاتيح البوابة لكل مزود مدمج
+  Map<String, String> gatewayKeys;
+  /// ترتيب تجربة البوابة
+  List<String> gatewayOrder;
 
   WahaSettings({
-    this.provider = 'مجاني بدون مفتاح (Pollinations)',
-    this.endpoint = 'https://text.pollinations.ai',
+    this.mode = 'gateway',
+    this.provider = 'WHAH Gateway',
+    this.endpoint = 'https://api.groq.com/openai/v1',
     this.apiKey = '',
-    this.model = 'openai',
+    this.model = 'llama-3.3-70b-versatile',
     this.streamEnabled = true,
     this.systemPrompt =
         'أنت مساعد ذكي اسمه WHAH AI. أجب بالعربية بشكل واضح ومفيد. يمكنك كتابة كود، تحليل بيانات، وتحويل مستندات.',
-  });
+    List<ProviderConfig>? customProviders,
+    Map<String, String>? gatewayKeys,
+    List<String>? gatewayOrder,
+  })  : customProviders = customProviders ?? [],
+        gatewayKeys = gatewayKeys ?? {},
+        gatewayOrder = gatewayOrder ??
+            [
+              'Groq',
+              'Gemini',
+              'NVIDIA',
+              'Cerebras',
+              'OpenRouter',
+              'Pollinations',
+            ];
+
+  /// تعريفات مزودي البوابة (OpenAI-compatible / HTTPS / JSON / SSE)
+  static Map<String, Map<String, String>> get builtInGateways => {
+        'Groq': {
+          'endpoint': 'https://api.groq.com/openai/v1',
+          'model': 'llama-3.3-70b-versatile',
+        },
+        'Gemini': {
+          'endpoint':
+              'https://generativelanguage.googleapis.com/v1beta/openai',
+          'model': 'gemini-2.0-flash',
+        },
+        'NVIDIA': {
+          'endpoint': 'https://integrate.api.nvidia.com/v1',
+          'model': 'meta/llama-3.1-8b-instruct',
+        },
+        'Cerebras': {
+          'endpoint': 'https://api.cerebras.ai/v1',
+          'model': 'llama-3.3-70b',
+        },
+        'OpenRouter': {
+          'endpoint': 'https://openrouter.ai/api/v1',
+          'model': 'openrouter/free',
+        },
+        'Pollinations': {
+          'endpoint': 'https://text.pollinations.ai',
+          'model': 'openai',
+        },
+      };
 
   Map<String, dynamic> toJson() => {
+        'mode': mode,
         'provider': provider,
         'endpoint': endpoint,
         'apiKey': apiKey,
         'model': model,
         'streamEnabled': streamEnabled,
         'systemPrompt': systemPrompt,
+        'customProviders': customProviders.map((e) => e.toJson()).toList(),
+        'gatewayKeys': gatewayKeys,
+        'gatewayOrder': gatewayOrder,
       };
 
   factory WahaSettings.fromJson(Map<String, dynamic> json) {
+    final customs = <ProviderConfig>[];
+    final rawList = json['customProviders'];
+    if (rawList is List) {
+      for (final item in rawList) {
+        if (item is Map) {
+          customs.add(
+            ProviderConfig.fromJson(Map<String, dynamic>.from(item)),
+          );
+        }
+      }
+    }
+    final keys = <String, String>{};
+    final rawKeys = json['gatewayKeys'];
+    if (rawKeys is Map) {
+      rawKeys.forEach((k, v) {
+        keys[k.toString()] = v?.toString() ?? '';
+      });
+    }
+    final order = <String>[];
+    final rawOrder = json['gatewayOrder'];
+    if (rawOrder is List) {
+      for (final o in rawOrder) {
+        order.add(o.toString());
+      }
+    }
     return WahaSettings(
-      provider: json['provider']?.toString() ?? 'OpenRouter (مجاني)',
+      mode: json['mode']?.toString() ?? 'gateway',
+      provider: json['provider']?.toString() ?? 'WHAH Gateway',
       endpoint: json['endpoint']?.toString() ??
-          'https://openrouter.ai/api/v1',
+          'https://api.groq.com/openai/v1',
       apiKey: json['apiKey']?.toString() ?? '',
-      model: json['model']?.toString() ?? 'openrouter/free',
+      model: json['model']?.toString() ?? 'llama-3.3-70b-versatile',
       streamEnabled: json['streamEnabled'] as bool? ?? true,
       systemPrompt: json['systemPrompt']?.toString() ??
           'أنت مساعد ذكي اسمه WHAH AI. أجب بالعربية بشكل واضح ومفيد.',
+      customProviders: customs,
+      gatewayKeys: keys,
+      gatewayOrder: order.isEmpty ? null : order,
     );
   }
+
+  /// هل الوضع بوابة ذكية؟
+  bool get isGateway =>
+      mode == 'gateway' || provider == 'WHAH Gateway' || provider.contains('Gateway');
 }
 
 // ───────────────────────────── التخزين المحلي ─────────────────────────────
 
 class LocalStorage {
-  static const settingsKey = 'waha_settings_v2';
+  static const settingsKey = 'waha_settings_v3';
   static const historyKey = 'waha_history_v2';
   static const appsKey = 'waha_connected_apps';
 
   static Future<WahaSettings> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(settingsKey);
-    if (raw == null || raw.isEmpty) return WahaSettings();
+    if (raw == null || raw.isEmpty) {
+      // محاولة قراءة الإصدار القديم
+      final old = prefs.getString('waha_settings_v2');
+      if (old == null || old.isEmpty) return WahaSettings();
+      try {
+        return WahaSettings.fromJson(
+          Map<String, dynamic>.from(jsonDecode(old)),
+        );
+      } catch (_) {
+        return WahaSettings();
+      }
+    }
     try {
-      final map = Map<String, dynamic>.from(jsonDecode(raw));
-      // ترحيل الأسماء القديمة
-      final p = map['provider']?.toString() ?? '';
-      if (p == 'Gateway' || p == 'Custom') {
-        map['provider'] = 'يدوي (Custom)';
-      }
-      if (p == 'OpenRouter') {
-        map['provider'] = 'OpenRouter (مجاني)';
-      }
-      if (p == 'Groq') {
-        map['provider'] = 'Groq (مجاني)';
-      }
-      return WahaSettings.fromJson(map);
+      return WahaSettings.fromJson(
+        Map<String, dynamic>.from(jsonDecode(raw)),
+      );
     } catch (_) {
       return WahaSettings();
     }
@@ -364,39 +483,30 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoading = false;
   bool _ready = false;
 
-  // Skills سريعة
+  // Skills — مهارات جاهزة حسب الفئة
   final List<Map<String, String>> _skills = [
-    {
-      'title': 'برمجة',
-      'prompt': 'اكتب كوداً نظيفاً مع شرح مختصر:',
-      'icon': 'code',
-    },
-    {
-      'title': 'تحليل بيانات',
-      'prompt': 'حلل البيانات التالية وأعطني ملخصاً وإحصائيات:',
-      'icon': 'analytics',
-    },
-    {
-      'title': 'تحويل مستند',
-      'prompt': 'حوّل المحتوى التالي إلى صيغة منظمة (Markdown):',
-      'icon': 'description',
-    },
-    {
-      'title': 'تلخيص',
-      'prompt': 'لخّص النص التالي بشكل واضح ومختصر:',
-      'icon': 'summarize',
-    },
-    {
-      'title': 'ترجمة',
-      'prompt': 'ترجم النص التالي إلى العربية بدقة:',
-      'icon': 'translate',
-    },
-    {
-      'title': 'أفكار',
-      'prompt': 'اقترح أفكاراً إبداعية حول:',
-      'icon': 'lightbulb',
-    },
+    {'title': 'كتابة كود', 'cat': 'برمجة', 'icon': 'code', 'prompt': 'اكتب كوداً نظيفاً وقابلاً للتشغيل مع تعليقات مختصرة. المطلوب:\n'},
+    {'title': 'إصلاح أخطاء', 'cat': 'برمجة', 'icon': 'bug', 'prompt': 'حلل الخطأ التالي، حدد السبب، وقدّم الكود المصحح:\n'},
+    {'title': 'مراجعة كود', 'cat': 'برمجة', 'icon': 'review', 'prompt': 'راجع الكود من ناحية الأمان والأداء والوضوح مع تحسينات:\n'},
+    {'title': 'Flutter / Dart', 'cat': 'برمجة', 'icon': 'phone', 'prompt': 'كمطور Flutter خبير، نفّذ المطلوب بكود Dart حديث:\n'},
+    {'title': 'تحليل بيانات', 'cat': 'بيانات', 'icon': 'analytics', 'prompt': 'حلل البيانات: ملخص، إحصائيات، أنماط، واستنتاجات:\n'},
+    {'title': 'جداول Excel', 'cat': 'بيانات', 'icon': 'table', 'prompt': 'نظّم البيانات كجدول Markdown بأعمدة واضحة:\n'},
+    {'title': 'SQL / استعلام', 'cat': 'بيانات', 'icon': 'storage', 'prompt': 'اكتب استعلام SQL فعال مع شرح الشروط:\n'},
+    {'title': 'تحويل مستند', 'cat': 'مستندات', 'icon': 'description', 'prompt': 'حوّل المحتوى إلى Markdown منظم بعناوين وقوائم:\n'},
+    {'title': 'تلخيص', 'cat': 'مستندات', 'icon': 'summarize', 'prompt': 'لخّص النص بنقاط واضحة مع أهم الأفكار:\n'},
+    {'title': 'إعادة صياغة', 'cat': 'مستندات', 'icon': 'edit', 'prompt': 'أعد صياغة النص بأسلوب احترافي مع الحفاظ على المعنى:\n'},
+    {'title': 'تقرير', 'cat': 'مستندات', 'icon': 'report', 'prompt': 'اكتب تقريراً (مقدمة، نقاط، خلاصة) عن:\n'},
+    {'title': 'ترجمة للعربية', 'cat': 'لغة', 'icon': 'translate', 'prompt': 'ترجم النص التالي إلى العربية الفصحى بدقة:\n'},
+    {'title': 'ترجمة للإنجليزية', 'cat': 'لغة', 'icon': 'translate', 'prompt': 'Translate the following text to clear professional English:\n'},
+    {'title': 'تدقيق لغوي', 'cat': 'لغة', 'icon': 'spell', 'prompt': 'صحّح الأخطاء اللغوية والإملائية وقدّم النسخة المعدّلة:\n'},
+    {'title': 'أفكار', 'cat': 'إبداع', 'icon': 'lightbulb', 'prompt': 'اقترح 8 أفكار عملية وإبداعية حول:\n'},
+    {'title': 'وصف صورة', 'cat': 'إبداع', 'icon': 'image', 'prompt': 'Write a detailed English image-generation prompt about:\n'},
+    {'title': 'فكرة فيديو', 'cat': 'إبداع', 'icon': 'video', 'prompt': 'اكتب سيناريو فيديو قصير (مقاطع + نص شاشة) عن:\n'},
+    {'title': 'README GitHub', 'cat': 'تطوير', 'icon': 'github', 'prompt': 'اكتب README.md احترافي (عربي/إنجليزي) للمشروع:\n'},
+    {'title': 'API / JSON', 'cat': 'تطوير', 'icon': 'api', 'prompt': 'صمّم REST API بصيغة JSON مع أمثلة طلب واستجابة:\n'},
+    {'title': 'خطة تطبيق', 'cat': 'تطوير', 'icon': 'app', 'prompt': 'ضع خطة تطبيق (شاشات، ميزات، تقنية) للفكرة:\n'},
   ];
+
 
   @override
   void initState() {
@@ -559,6 +669,12 @@ class _ChatPageState extends State<ChatPage> {
     _controller.text = prompt;
     _controller.selection = TextSelection.collapsed(offset: prompt.length);
     _focusNode.requestFocus();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('مهارة: ${skill['title'] ?? ""} — أكمل الطلب ثم أرسل'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _sendMessage() async {
@@ -567,11 +683,12 @@ class _ChatPageState extends State<ChatPage> {
     if (_isLoading) return;
 
     // تحقق من الإعدادات
-    final noKeyOk = _settings.provider.contains('بدون مفتاح') ||
-        _settings.provider.contains('Pollinations') ||
-        _settings.provider.contains('يدوي') ||
-        _settings.provider == 'Custom';
-    if (_settings.apiKey.trim().isEmpty && !noKeyOk) {
+    if (!_settings.isGateway &&
+        _settings.apiKey.trim().isEmpty &&
+        !_settings.provider.contains('بدون مفتاح') &&
+        !_settings.provider.contains('Pollinations') &&
+        !_settings.provider.contains('يدوي') &&
+        _settings.provider != 'Custom') {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('أدخل مفتاح API من الإعدادات أولاً'),
@@ -614,13 +731,6 @@ class _ChatPageState extends State<ChatPage> {
     });
 
     try {
-      final service = AIService(
-        endpoint: _settings.endpoint,
-        apiKey: _settings.apiKey,
-        model: _settings.model,
-        provider: _settings.provider,
-      );
-
       // بناء الرسائل مع system prompt
       final messages = <Map<String, dynamic>>[];
 
@@ -640,18 +750,71 @@ class _ChatPageState extends State<ChatPage> {
         });
       }
 
-      // مسار سريع: بث فوري مع سقوط تلقائي للطلب العادي
-      await service.sendSmart(
-        messages: messages,
-        preferStream: _settings.streamEnabled,
-        onChunk: (chunk) {
-          if (!mounted || chunk.isEmpty) return;
-          setState(() {
-            assistantMessage.content += chunk;
-          });
-          _scrollToBottom();
-        },
-      );
+      // محاولات: بوابة ذكية (تبديل تلقائي) أو مزود واحد
+      final attempts = <AIService>[];
+
+      if (_settings.isGateway) {
+        for (final name in _settings.gatewayOrder) {
+          final preset = WahaSettings.builtInGateways[name];
+          if (preset == null) continue;
+          final key = _settings.gatewayKeys[name] ?? '';
+          if (key.isEmpty && name != 'Pollinations') continue;
+          attempts.add(AIService(
+            endpoint: preset['endpoint']!,
+            apiKey: key,
+            model: preset['model']!,
+            provider: name,
+          ));
+        }
+        if (attempts.isEmpty) {
+          final p = WahaSettings.builtInGateways['Pollinations']!;
+          attempts.add(AIService(
+            endpoint: p['endpoint']!,
+            apiKey: '',
+            model: p['model']!,
+            provider: 'Pollinations',
+          ));
+        }
+      } else {
+        attempts.add(AIService(
+          endpoint: _settings.endpoint,
+          apiKey: _settings.apiKey,
+          model: _settings.model,
+          provider: _settings.provider,
+        ));
+      }
+
+      Object? lastError;
+      var success = false;
+      for (final service in attempts) {
+        try {
+          final result = await service.sendSmart(
+            messages: messages,
+            preferStream: _settings.streamEnabled,
+            onChunk: (chunk) {
+              if (!mounted || chunk.isEmpty) return;
+              setState(() {
+                assistantMessage.content += chunk;
+              });
+              _scrollToBottom();
+            },
+          );
+          if (result.trim().isNotEmpty ||
+              assistantMessage.content.trim().isNotEmpty) {
+            success = true;
+            break;
+          }
+        } catch (e) {
+          lastError = e;
+          if (mounted) {
+            setState(() => assistantMessage.content = '');
+          }
+        }
+      }
+
+      if (!success) {
+        throw lastError ?? Exception('فشلت جميع مزودي البوابة');
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -800,45 +963,90 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _showSkillsSheet() {
+    final cats = <String>[];
+    for (final s in _skills) {
+      final c = s['cat'] ?? 'عام';
+      if (!cats.contains(c)) cats.add(c);
+    }
+
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Skills — مهارات سريعة',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: _skills.map((s) {
-                  return ActionChip(
-                    avatar: Icon(_skillIcon(s['icon']), size: 18),
-                    label: Text(s['title']!),
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _applySkill(s);
-                    },
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.75,
+          minChildSize: 0.4,
+          maxChildSize: 0.92,
+          builder: (context, scrollController) {
+            return ListView(
+              controller: scrollController,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.black26,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+                const Text(
+                  'Skills — المهارات',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'اختر مهارة لملء صندوق الكتابة، ثم أكمل طلبك وأرسل.',
+                  style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                ),
+                const SizedBox(height: 8),
+                ...cats.map((cat) {
+                  final items =
+                      _skills.where((s) => (s['cat'] ?? 'عام') == cat).toList();
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12, bottom: 8),
+                        child: Text(
+                          cat,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: items.map((s) {
+                          return ActionChip(
+                            avatar: Icon(_skillIcon(s['icon']), size: 18),
+                            label: Text(s['title'] ?? ''),
+                            backgroundColor: AppColors.bg,
+                            side: const BorderSide(color: AppColors.border),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _applySkill(s);
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
                   );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'اضغط على مهارة لإدخال الأمر في صندوق الكتابة.',
-                style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
-              ),
-            ],
-          ),
+                }),
+              ],
+            );
+          },
         );
       },
     );
@@ -848,16 +1056,42 @@ class _ChatPageState extends State<ChatPage> {
     switch (name) {
       case 'code':
         return Icons.code;
+      case 'bug':
+        return Icons.bug_report_outlined;
+      case 'review':
+        return Icons.rate_review_outlined;
+      case 'phone':
+        return Icons.phone_android;
       case 'analytics':
         return Icons.analytics_outlined;
+      case 'table':
+        return Icons.table_chart_outlined;
+      case 'storage':
+        return Icons.storage_outlined;
       case 'description':
         return Icons.description_outlined;
       case 'summarize':
         return Icons.short_text;
+      case 'edit':
+        return Icons.edit_note;
+      case 'report':
+        return Icons.article_outlined;
       case 'translate':
         return Icons.translate;
+      case 'spell':
+        return Icons.spellcheck;
       case 'lightbulb':
         return Icons.lightbulb_outline;
+      case 'image':
+        return Icons.image_outlined;
+      case 'video':
+        return Icons.videocam_outlined;
+      case 'github':
+        return Icons.merge_type;
+      case 'api':
+        return Icons.api_outlined;
+      case 'app':
+        return Icons.apps_outlined;
       default:
         return Icons.auto_awesome;
     }
@@ -1361,6 +1595,64 @@ class _ConnectedAppsSheetState extends State<ConnectedAppsSheet> {
 
 // ───────────────────────────── شاشة الإعدادات ─────────────────────────────
 
+
+class _GatewayKeyTile extends StatefulWidget {
+  final String name;
+  final bool enabled;
+  final String initialKey;
+  final ValueChanged<String> onChanged;
+
+  const _GatewayKeyTile({
+    required this.name,
+    required this.enabled,
+    required this.initialKey,
+    required this.onChanged,
+  });
+
+  @override
+  State<_GatewayKeyTile> createState() => _GatewayKeyTileState();
+}
+
+class _GatewayKeyTileState extends State<_GatewayKeyTile> {
+  late TextEditingController _c;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = TextEditingController(text: widget.initialKey);
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextField(
+        controller: _c,
+        enabled: widget.enabled,
+        obscureText: true,
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.left,
+        style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+        onChanged: widget.onChanged,
+        decoration: InputDecoration(
+          labelText: widget.enabled
+              ? '${widget.name} API Key'
+              : '${widget.name} (بدون مفتاح)',
+          border: const OutlineInputBorder(),
+          isDense: true,
+          prefixIcon: const Icon(Icons.key_outlined, size: 20),
+        ),
+      ),
+    );
+  }
+}
+
 class SettingsPage extends StatefulWidget {
   final WahaSettings settings;
 
@@ -1375,18 +1667,22 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController _apiKeyController;
   late TextEditingController _modelController;
   late TextEditingController _systemController;
+  late TextEditingController _customNameController;
   late String _provider;
+  late String _mode;
   late bool _streamEnabled;
+  late List<ProviderConfig> _customProviders;
+  late Map<String, String> _gatewayKeys;
+  late List<String> _gatewayOrder;
   bool _testing = false;
   String? _testResult;
+  bool _showAddCustom = false;
 
-  static const _providers = {
-    // —— بدون مفتاح API ——
+  static const _singleProviders = {
     'مجاني بدون مفتاح (Pollinations)': {
       'endpoint': 'https://text.pollinations.ai',
       'model': 'openai',
     },
-    // —— مجاني بمفتاح مجاني ——
     'Groq (مجاني)': {
       'endpoint': 'https://api.groq.com/openai/v1',
       'model': 'llama-3.3-70b-versatile',
@@ -1396,7 +1692,8 @@ class _SettingsPageState extends State<SettingsPage> {
       'model': 'openrouter/free',
     },
     'Google Gemini (مجاني)': {
-      'endpoint': 'https://generativelanguage.googleapis.com/v1beta/openai',
+      'endpoint':
+          'https://generativelanguage.googleapis.com/v1beta/openai',
       'model': 'gemini-2.0-flash',
     },
     'DeepSeek': {
@@ -1411,10 +1708,6 @@ class _SettingsPageState extends State<SettingsPage> {
       'endpoint': 'https://api.openai.com/v1',
       'model': 'gpt-4o-mini',
     },
-    'OpenRouter': {
-      'endpoint': 'https://openrouter.ai/api/v1',
-      'model': 'openai/gpt-4o-mini',
-    },
     'يدوي (Custom)': {
       'endpoint': '',
       'model': '',
@@ -1424,14 +1717,18 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
-    _provider = widget.settings.provider;
-    _streamEnabled = widget.settings.streamEnabled;
-    _endpointController =
-        TextEditingController(text: widget.settings.endpoint);
-    _apiKeyController = TextEditingController(text: widget.settings.apiKey);
-    _modelController = TextEditingController(text: widget.settings.model);
-    _systemController =
-        TextEditingController(text: widget.settings.systemPrompt);
+    final s = widget.settings;
+    _provider = s.provider;
+    _mode = s.isGateway ? 'gateway' : 'single';
+    _streamEnabled = s.streamEnabled;
+    _customProviders = List<ProviderConfig>.from(s.customProviders);
+    _gatewayKeys = Map<String, String>.from(s.gatewayKeys);
+    _gatewayOrder = List<String>.from(s.gatewayOrder);
+    _endpointController = TextEditingController(text: s.endpoint);
+    _apiKeyController = TextEditingController(text: s.apiKey);
+    _modelController = TextEditingController(text: s.model);
+    _systemController = TextEditingController(text: s.systemPrompt);
+    _customNameController = TextEditingController();
   }
 
   @override
@@ -1440,32 +1737,91 @@ class _SettingsPageState extends State<SettingsPage> {
     _apiKeyController.dispose();
     _modelController.dispose();
     _systemController.dispose();
+    _customNameController.dispose();
     super.dispose();
+  }
+
+  List<String> get _allProviderNames {
+    final names = <String>['WHAH Gateway'];
+    names.addAll(_singleProviders.keys);
+    for (final c in _customProviders) {
+      if (c.name.isNotEmpty) names.add(c.name);
+    }
+    return names;
   }
 
   void _applyProvider(String provider) {
     setState(() {
       _provider = provider;
-      final preset = _providers[provider];
+      if (provider == 'WHAH Gateway') {
+        _mode = 'gateway';
+        return;
+      }
+      _mode = 'single';
+      final preset = _singleProviders[provider];
       if (preset != null) {
         if (preset['endpoint']!.isNotEmpty) {
-          _endpointController.value = TextEditingValue(
-            text: preset['endpoint']!,
-            selection: TextSelection.collapsed(offset: preset['endpoint']!.length),
-          );
+          _endpointController.text = preset['endpoint']!;
         }
         if (preset['model']!.isNotEmpty) {
-          _modelController.value = TextEditingValue(
-            text: preset['model']!,
-            selection: TextSelection.collapsed(offset: preset['model']!.length),
-          );
+          _modelController.text = preset['model']!;
         }
-        // مزود بدون مفتاح: امسح المفتاح
-        if (provider.contains('بدون مفتاح') || provider.contains('Pollinations')) {
+        if (provider.contains('بدون مفتاح') ||
+            provider.contains('Pollinations')) {
           _apiKeyController.clear();
+        }
+        return;
+      }
+      // مزود يدوي محفوظ
+      for (final c in _customProviders) {
+        if (c.name == provider) {
+          _endpointController.text = c.endpoint;
+          _apiKeyController.text = c.apiKey;
+          _modelController.text = c.model;
+          break;
         }
       }
     });
+  }
+
+  void _saveCustomProvider() {
+    final name = _customNameController.text.trim();
+    final endpoint = _endpointController.text.trim();
+    final model = _modelController.text.trim();
+    final key = _apiKeyController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('أدخل اسم المزود أولاً')),
+      );
+      return;
+    }
+    if (endpoint.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('أدخل رابط API للمزود')),
+      );
+      return;
+    }
+    setState(() {
+      final idx = _customProviders.indexWhere((e) => e.name == name);
+      final cfg = ProviderConfig(
+        name: name,
+        endpoint: endpoint,
+        apiKey: key,
+        model: model,
+      );
+      if (idx >= 0) {
+        _customProviders[idx] = cfg;
+      } else {
+        _customProviders.add(cfg);
+      }
+      _provider = name;
+      _mode = 'single';
+      _showAddCustom = false;
+      _customNameController.clear();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('تم حفظ المزود «$name»')),
+    );
   }
 
   Future<void> _testConnection() async {
@@ -1474,69 +1830,116 @@ class _SettingsPageState extends State<SettingsPage> {
       _testResult = null;
     });
 
-    final endpoint = _endpointController.text.trim();
-    final apiKey = _apiKeyController.text.trim();
-    final model = _modelController.text.trim();
-
-    if (endpoint.isEmpty) {
-      setState(() {
-        _testResult = '❌ أدخل عنوان API أولاً';
-        _testing = false;
-      });
-      return;
-    }
-    if (model.isEmpty) {
-      setState(() {
-        _testResult = '❌ أدخل اسم النموذج أولاً';
-        _testing = false;
-      });
-      return;
-    }
-    final noKeyOk = _provider.contains('بدون مفتاح') ||
-        _provider.contains('Pollinations') ||
-        _provider.contains('يدوي') ||
-        _provider == 'Custom';
-    if (apiKey.isEmpty && !noKeyOk) {
-      setState(() {
-        _testResult = '❌ أدخل مفتاح API أولاً';
-        _testing = false;
-      });
-      return;
-    }
-
-    final service = AIService(
-      endpoint: endpoint,
-      apiKey: apiKey,
-      model: model,
-      provider: _provider,
-    );
-
     try {
+      if (_mode == 'gateway') {
+        // اختبر أول مزود متاح في البوابة
+        String? err;
+        var any = false;
+        for (final name in _gatewayOrder) {
+          final preset = WahaSettings.builtInGateways[name];
+          if (preset == null) continue;
+          final key = _gatewayKeys[name] ?? '';
+          if (key.isEmpty && name != 'Pollinations') continue;
+          any = true;
+          final service = AIService(
+            endpoint: preset['endpoint']!,
+            apiKey: key,
+            model: preset['model']!,
+            provider: name,
+          );
+          final e = await service.testConnectionDetailed();
+          if (e == null) {
+            setState(() => _testResult = '✅ البوابة تعمل — نجح: $name');
+            return;
+          }
+          err = e;
+        }
+        if (!any) {
+          setState(() =>
+              _testResult = '❌ أضف مفتاحاً لمزود واحد على الأقل في البوابة');
+        } else {
+          setState(() => _testResult = '❌ فشل الاتصال: ${err ?? ""}');
+        }
+        return;
+      }
+
+      final endpoint = _endpointController.text.trim();
+      final apiKey = _apiKeyController.text.trim();
+      final model = _modelController.text.trim();
+      final noKeyOk = _provider.contains('بدون مفتاح') ||
+          _provider.contains('Pollinations') ||
+          _provider.contains('يدوي');
+
+      if (endpoint.isEmpty) {
+        setState(() => _testResult = '❌ أدخل الرابط أولاً');
+        return;
+      }
+      if (apiKey.isEmpty && !noKeyOk) {
+        setState(() => _testResult = '❌ أدخل API Key');
+        return;
+      }
+      if (model.isEmpty) {
+        setState(() => _testResult = '❌ أدخل اسم النموذج');
+        return;
+      }
+
+      final service = AIService(
+        endpoint: endpoint,
+        apiKey: apiKey,
+        model: model,
+        provider: _provider,
+      );
       final err = await service.testConnectionDetailed();
       setState(() {
-        _testResult = err == null
-            ? '✅ الاتصال ناجح — يمكنك الحفظ والبدء'
-            : '❌ فشل الاتصال:\n$err';
+        _testResult = err == null ? '✅ الاتصال ناجح' : '❌ فشل الاتصال:\n$err';
       });
     } catch (e) {
-      setState(() {
-        _testResult = '❌ $e';
-      });
+      setState(() => _testResult = '❌ $e');
     } finally {
-      setState(() => _testing = false);
+      if (mounted) setState(() => _testing = false);
     }
   }
 
-  void _save() {
-    Navigator.pop(
-      context,
-      WahaSettings(
-        provider: _provider,
-        endpoint: _endpointController.text.trim(),
-        apiKey: _apiKeyController.text.trim(),
-        model: _modelController.text.trim(),
-        streamEnabled: _streamEnabled,
-        systemPrompt: _systemController.text.trim(),
+  Future<void> _save() async {
+    final settings = WahaSettings(
+      mode: _mode,
+      provider: _mode == 'gateway' ? 'WHAH Gateway' : _provider,
+      endpoint: _endpointController.text.trim(),
+      apiKey: _apiKeyController.text.trim(),
+      model: _modelController.text.trim(),
+      streamEnabled: _streamEnabled,
+      systemPrompt: _systemController.text.trim(),
+      customProviders: _customProviders,
+      gatewayKeys: _gatewayKeys,
+      gatewayOrder: _gatewayOrder,
+    );
+    await LocalStorage.saveSettings(settings);
+    if (!mounted) return;
+    Navigator.pop(context, settings);
+  }
+
+  Widget _ltrField({
+    required TextEditingController controller,
+    required String label,
+    String? hint,
+    bool obscure = false,
+    TextInputType? keyboardType,
+    IconData? icon,
+  }) {
+    return TextField(
+      controller: controller,
+      obscureText: obscure,
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.left,
+      keyboardType: keyboardType,
+      style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        hintTextDirection: TextDirection.ltr,
+        border: const OutlineInputBorder(),
+        prefixIcon: icon != null ? Icon(icon) : null,
+        isDense: true,
       ),
     );
   }
@@ -1546,159 +1949,261 @@ class _SettingsPageState extends State<SettingsPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('إعدادات الذكاء الاصطناعي'),
-        actions: [
-          IconButton(
-            tooltip: 'حفظ',
-            onPressed: _save,
-            icon: const Icon(Icons.check),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      // شريط حفظ ثابت أسفل الشاشة (بعيد عن أزرار النظام)
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 8,
+                offset: const Offset(0, -2),
+              ),
+            ],
           ),
-        ],
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _testing ? null : _testConnection,
+                  icon: _testing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.wifi_tethering),
+                  label: Text(_testing ? 'اختبار...' : 'اختبار'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.save),
+                  label: const Text('حفظ'),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          const Text(
-            'مزود الذكاء الاصطناعي',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
+          // وضع التشغيل
+          const Text('وضع التشغيل',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 8),
-          DropdownButtonFormField<String>(
-            value: _provider,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.cloud_outlined),
-            ),
-            items: _providers.keys
-                .map(
-                  (p) => DropdownMenuItem(value: p, child: Text(p)),
-                )
-                .toList(),
-            onChanged: (v) {
-              if (v != null) _applyProvider(v);
+          SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(
+                value: 'gateway',
+                label: Text('بوابة ذكية'),
+                icon: Icon(Icons.hub_outlined, size: 18),
+              ),
+              ButtonSegment(
+                value: 'single',
+                label: Text('مزود واحد'),
+                icon: Icon(Icons.smart_toy_outlined, size: 18),
+              ),
+            ],
+            selected: {_mode},
+            onSelectionChanged: (s) {
+              setState(() {
+                _mode = s.first;
+                if (_mode == 'gateway') {
+                  _provider = 'WHAH Gateway';
+                }
+              });
             },
           ),
           const SizedBox(height: 16),
-          TextField(
-            controller: _endpointController,
-            textDirection: TextDirection.ltr,
-            textAlign: TextAlign.left,
-            keyboardType: TextInputType.url,
-            style: const TextStyle(
-              fontFamily: 'monospace',
-              letterSpacing: 0,
+
+          if (_mode == 'gateway') ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEAF7FF),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                'المستخدم ← WHAH Gateway ← اختيار تلقائي\n'
+                'Groq → Gemini → NVIDIA → Cerebras → OpenRouter → Pollinations\n'
+                'البروتوكول: HTTPS + REST + JSON + OpenAI API + SSE',
+                style: TextStyle(fontSize: 13, height: 1.45),
+              ),
             ),
-            decoration: const InputDecoration(
-              labelText: 'API Endpoint (رابط المزود)',
-              hintText: 'https://openrouter.ai/api/v1',
-              hintTextDirection: TextDirection.ltr,
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.link),
-              helperText:
-                  'اكتب الرابط من اليسار لليمين. مثال: https://openrouter.ai/api/v1',
-              helperMaxLines: 2,
+            const SizedBox(height: 12),
+            const Text('مفاتيح مزودي البوابة',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            ...WahaSettings.builtInGateways.entries.map((e) {
+              final name = e.key;
+              final needsKey = name != 'Pollinations';
+              return _GatewayKeyTile(
+                name: name,
+                enabled: needsKey,
+                initialKey: _gatewayKeys[name] ?? '',
+                onChanged: (v) => _gatewayKeys[name] = v,
+              );
+            }),
+          ] else ...[
+            // قائمة مزودين قريبة من الأعلى
+            const Text('المزود',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              // ignore: deprecated_member_use
+              value: _allProviderNames.contains(_provider)
+                  ? _provider
+                  : _allProviderNames.first,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.cloud_outlined),
+                isDense: true,
+              ),
+              items: _allProviderNames
+                  .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                  .toList(),
+              onChanged: (v) {
+                if (v != null) _applyProvider(v);
+              },
             ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _apiKeyController,
-            obscureText: true,
-            textDirection: TextDirection.ltr,
-            textAlign: TextAlign.left,
-            style: const TextStyle(fontFamily: 'monospace'),
-            decoration: const InputDecoration(
-              labelText: 'API Key',
-              hintText: 'sk-or-v1-...',
-              hintTextDirection: TextDirection.ltr,
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.key_outlined),
+            const SizedBox(height: 12),
+
+            // إضافة مزود يدوي بالاسم
+            OutlinedButton.icon(
+              onPressed: () => setState(() => _showAddCustom = !_showAddCustom),
+              icon: Icon(_showAddCustom ? Icons.close : Icons.add),
+              label: Text(
+                _showAddCustom ? 'إلغاء' : 'إضافة مزود يدوي (بالاسم)',
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _modelController,
-            textDirection: TextDirection.ltr,
-            textAlign: TextAlign.left,
-            style: const TextStyle(fontFamily: 'monospace'),
-            decoration: const InputDecoration(
-              labelText: 'Model',
-              hintText: 'openrouter/free',
-              hintTextDirection: TextDirection.ltr,
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.smart_toy_outlined),
+            if (_showAddCustom) ...[
+              const SizedBox(height: 10),
+              TextField(
+                controller: _customNameController,
+                decoration: const InputDecoration(
+                  labelText: 'اسم المزود (يُحفظ بهذا الاسم)',
+                  hintText: 'مثال: شركتي / سيرفري',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.badge_outlined),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              FilledButton.tonalIcon(
+                onPressed: _saveCustomProvider,
+                icon: const Icon(Icons.playlist_add_check),
+                label: const Text('حفظ هذا المزود في القائمة'),
+              ),
+            ],
+            if (_customProviders.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _customProviders.map((c) {
+                  return InputChip(
+                    label: Text(c.name),
+                    selected: _provider == c.name,
+                    onSelected: (_) => _applyProvider(c.name),
+                    onDeleted: () {
+                      setState(() {
+                        _customProviders.removeWhere((e) => e.name == c.name);
+                        if (_provider == c.name) {
+                          _provider = 'Groq (مجاني)';
+                          _applyProvider(_provider);
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+            ],
+            const SizedBox(height: 14),
+            _ltrField(
+              controller: _endpointController,
+              label: 'API Endpoint (HTTPS)',
+              hint: 'https://api.groq.com/openai/v1',
+              keyboardType: TextInputType.url,
+              icon: Icons.link,
             ),
-          ),
+            const SizedBox(height: 10),
+            _ltrField(
+              controller: _apiKeyController,
+              label: 'API Key',
+              hint: 'sk-...',
+              obscure: true,
+              icon: Icons.key_outlined,
+            ),
+            const SizedBox(height: 10),
+            _ltrField(
+              controller: _modelController,
+              label: 'Model',
+              hint: 'llama-3.3-70b-versatile',
+              icon: Icons.smart_toy_outlined,
+            ),
+          ],
+
           const SizedBox(height: 14),
           TextField(
             controller: _systemController,
             minLines: 2,
-            maxLines: 4,
+            maxLines: 3,
             decoration: const InputDecoration(
-              labelText: 'System Prompt (تعليمات النظام)',
+              labelText: 'System Prompt',
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.psychology_outlined),
+              isDense: true,
             ),
           ),
-          const SizedBox(height: 12),
           SwitchListTile(
-            title: const Text('البث المباشر (Streaming)'),
-            subtitle: const Text('استجابة فورية مثل ChatGPT و Claude'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('البث المباشر (SSE Streaming)'),
+            subtitle: const Text('OpenAI-compatible + Server-Sent Events'),
             value: _streamEnabled,
             activeThumbColor: AppColors.primary,
             onChanged: (v) => setState(() => _streamEnabled = v),
           ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _testing ? null : _testConnection,
-            icon: _testing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.wifi_tethering),
-            label: Text(_testing ? 'جاري الاختبار...' : 'اختبار الاتصال'),
-          ),
-          if (_testResult != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              _testResult!,
-              style: TextStyle(
-                color: _testResult!.startsWith('✅')
-                    ? Colors.green.shade700
-                    : Colors.red.shade700,
-                fontWeight: FontWeight.w500,
+          if (_testResult != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                _testResult!,
+                style: TextStyle(
+                  color: _testResult!.startsWith('✅')
+                      ? Colors.green.shade700
+                      : Colors.red.shade700,
+                  fontWeight: FontWeight.w500,
+                  height: 1.35,
+                ),
               ),
             ),
-          ],
-          const SizedBox(height: 20),
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFEAF7FF),
-              borderRadius: BorderRadius.circular(14),
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: const Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.info_outline, color: AppColors.primary),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'مجاني بدون مفتاح: اختر «مجاني بدون مفتاح (Pollinations)».\n'
-                    'مجاني بمفتاح: Groq أو Gemini أو OpenRouter.\n'
-                    'اكتب الرابط والنموذج من اليسار لليمين.',
-                    style: TextStyle(fontSize: 13, height: 1.4),
-                  ),
-                ),
-              ],
+            child: const Text(
+              'البروتوكول: HTTPS · REST API · JSON · OpenAI-compatible · SSE\n'
+              'البوابة تجرب المزودين بالترتيب وتسقط تلقائياً عند الفشل.',
+              style: TextStyle(fontSize: 12.5, height: 1.4),
             ),
           ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: _save,
-            icon: const Icon(Icons.save),
-            label: const Text('حفظ الإعدادات'),
-          ),
+          // مساحة إضافية فوق شريط الحفظ
+          const SizedBox(height: 16),
         ],
       ),
     );
