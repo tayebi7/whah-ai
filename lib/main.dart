@@ -250,7 +250,7 @@ class ProviderConfig {
 }
 
 class WahaSettings {
-  /// single = مزود واحد | gateway = تبديل تلقائي
+  /// single = مزود واحد يدوي | gateway = بوابة ذكية (تجربة المزودين المحفوظين بالترتيب)
   String mode;
   String provider;
   String endpoint;
@@ -258,19 +258,19 @@ class WahaSettings {
   String model;
   bool streamEnabled;
   String systemPrompt;
-  /// مزودون يدويون محفوظون بالاسم
+  /// مزودون يدويون محفوظون (الاسم + endpoint + key + model)
   List<ProviderConfig> customProviders;
-  /// مفاتيح البوابة لكل مزود مدمج
-  Map<String, String> gatewayKeys;
-  /// ترتيب تجربة البوابة
+  /// ترتيب أسماء المزودين في البوابة (من قائمة customProviders)
   List<String> gatewayOrder;
+  /// تشغيل / إيقاف الاتصال بالكامل
+  bool connectionEnabled;
 
   WahaSettings({
-    this.mode = 'gateway',
-    this.provider = 'WHAH Gateway',
-    this.endpoint = 'https://api.groq.com/openai/v1',
+    this.mode = 'single',
+    this.provider = '',
+    this.endpoint = '',
     this.apiKey = '',
-    this.model = 'llama-3.3-70b-versatile',
+    this.model = '',
     this.streamEnabled = true,
     this.systemPrompt =
         'أنت WHAH AI — مساعد ذكي متعدد القدرات. تعرّف تلقائياً على نوع السؤال وأجب بالشكل الأنسب:\n'
@@ -283,48 +283,10 @@ class WahaSettings {
         '• وسائل تواصل: منشورات مناسبة للمنصة.\n'
         'أجب بالعربية إلا إذا طُلب غير ذلك. كن واضحاً ومفيداً ومختصراً عند الإمكان.',
     List<ProviderConfig>? customProviders,
-    Map<String, String>? gatewayKeys,
     List<String>? gatewayOrder,
+    this.connectionEnabled = false,
   })  : customProviders = customProviders ?? [],
-        gatewayKeys = gatewayKeys ?? {},
-        gatewayOrder = gatewayOrder ??
-            [
-              'Groq',
-              'Gemini',
-              'NVIDIA',
-              'Cerebras',
-              'OpenRouter',
-              'Pollinations',
-            ];
-
-  /// تعريفات مزودي البوابة (OpenAI-compatible / HTTPS / JSON / SSE)
-  static Map<String, Map<String, String>> get builtInGateways => {
-        'Groq': {
-          'endpoint': 'https://api.groq.com/openai/v1',
-          'model': 'llama-3.3-70b-versatile',
-        },
-        'Gemini': {
-          'endpoint':
-              'https://generativelanguage.googleapis.com/v1beta/openai',
-          'model': 'gemini-2.0-flash',
-        },
-        'NVIDIA': {
-          'endpoint': 'https://integrate.api.nvidia.com/v1',
-          'model': 'meta/llama-3.1-8b-instruct',
-        },
-        'Cerebras': {
-          'endpoint': 'https://api.cerebras.ai/v1',
-          'model': 'llama-3.3-70b',
-        },
-        'OpenRouter': {
-          'endpoint': 'https://openrouter.ai/api/v1',
-          'model': 'openrouter/free',
-        },
-        'Pollinations': {
-          'endpoint': 'https://text.pollinations.ai',
-          'model': 'openai',
-        },
-      };
+        gatewayOrder = gatewayOrder ?? [];
 
   Map<String, dynamic> toJson() => {
         'mode': mode,
@@ -335,8 +297,8 @@ class WahaSettings {
         'streamEnabled': streamEnabled,
         'systemPrompt': systemPrompt,
         'customProviders': customProviders.map((e) => e.toJson()).toList(),
-        'gatewayKeys': gatewayKeys,
         'gatewayOrder': gatewayOrder,
+        'connectionEnabled': connectionEnabled,
       };
 
   factory WahaSettings.fromJson(Map<String, dynamic> json) {
@@ -351,13 +313,6 @@ class WahaSettings {
         }
       }
     }
-    final keys = <String, String>{};
-    final rawKeys = json['gatewayKeys'];
-    if (rawKeys is Map) {
-      rawKeys.forEach((k, v) {
-        keys[k.toString()] = v?.toString() ?? '';
-      });
-    }
     final order = <String>[];
     final rawOrder = json['gatewayOrder'];
     if (rawOrder is List) {
@@ -366,24 +321,29 @@ class WahaSettings {
       }
     }
     return WahaSettings(
-      mode: json['mode']?.toString() ?? 'gateway',
-      provider: json['provider']?.toString() ?? 'WHAH Gateway',
-      endpoint: json['endpoint']?.toString() ??
-          'https://api.groq.com/openai/v1',
+      mode: json['mode']?.toString() == 'gateway' ? 'gateway' : 'single',
+      provider: json['provider']?.toString() ?? '',
+      endpoint: json['endpoint']?.toString() ?? '',
       apiKey: json['apiKey']?.toString() ?? '',
-      model: json['model']?.toString() ?? 'llama-3.3-70b-versatile',
+      model: json['model']?.toString() ?? '',
       streamEnabled: json['streamEnabled'] as bool? ?? true,
       systemPrompt: json['systemPrompt']?.toString() ??
           'أنت مساعد ذكي اسمه WHAH AI. أجب بالعربية بشكل واضح ومفيد.',
       customProviders: customs,
-      gatewayKeys: keys,
-      gatewayOrder: order.isEmpty ? null : order,
+      gatewayOrder: order,
+      connectionEnabled: json['connectionEnabled'] as bool? ?? false,
     );
   }
 
   /// هل الوضع بوابة ذكية؟
-  bool get isGateway =>
-      mode == 'gateway' || provider == 'WHAH Gateway' || provider.contains('Gateway');
+  bool get isGateway => mode == 'gateway';
+
+  /// هل الاتصال مفعّل وجاهز؟
+  bool get isConnected =>
+      connectionEnabled &&
+      (isGateway
+          ? customProviders.isNotEmpty
+          : endpoint.trim().isNotEmpty);
 }
 
 // ───────────────────────────── التخزين المحلي ─────────────────────────────
@@ -661,6 +621,24 @@ class _ChatPageState extends State<ChatPage> {
     await LocalStorage.saveSettings(_settings);
   }
 
+  Future<void> _toggleConnection() async {
+    setState(() {
+      _settings.connectionEnabled = !_settings.connectionEnabled;
+    });
+    await LocalStorage.saveSettings(_settings);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _settings.connectionEnabled
+              ? 'تم تشغيل الاتصال'
+              : 'تم إيقاف الاتصال',
+        ),
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
   void _newChat() {
     setState(() {
       _currentChat = ChatHistory(title: 'محادثة جديدة');
@@ -707,16 +685,35 @@ class _ChatPageState extends State<ChatPage> {
     if (text.isEmpty && _attachedFiles.isEmpty) return;
     if (_isLoading) return;
 
-    // تحقق من الإعدادات
-    if (!_settings.isGateway &&
-        _settings.apiKey.trim().isEmpty &&
-        !_settings.provider.contains('بدون مفتاح') &&
-        !_settings.provider.contains('Pollinations') &&
-        !_settings.provider.contains('يدوي') &&
-        _settings.provider != 'Custom') {
+    // تحقق من تشغيل الاتصال
+    if (!_settings.connectionEnabled) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('أدخل مفتاح API من الإعدادات أولاً'),
+          content: const Text('الاتصال متوقف. اضغط زر التشغيل لتشغيله'),
+          action: SnackBarAction(
+            label: 'الإعدادات',
+            onPressed: _openSettings,
+          ),
+        ),
+      );
+      return;
+    }
+    if (!_settings.isGateway && _settings.endpoint.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('أدخل بيانات المزود من الإعدادات أولاً'),
+          action: SnackBarAction(
+            label: 'الإعدادات',
+            onPressed: _openSettings,
+          ),
+        ),
+      );
+      return;
+    }
+    if (_settings.isGateway && _settings.customProviders.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('أضف مزوداً واحداً على الأقل للبوابة الذكية'),
           action: SnackBarAction(
             label: 'الإعدادات',
             onPressed: _openSettings,
@@ -811,29 +808,33 @@ class _ChatPageState extends State<ChatPage> {
         }
       }
 
-      // محاولات: بوابة ذكية (تبديل تلقائي) أو مزود واحد
+      // محاولات: بوابة ذكية (المزودون اليدويون بالترتيب) أو مزود واحد
       final attempts = <AIService>[];
 
       if (_settings.isGateway) {
+        // ترتيب البوابة من gatewayOrder ثم بقية المزودين المحفوظين
+        final ordered = <ProviderConfig>[];
+        final used = <String>{};
         for (final name in _settings.gatewayOrder) {
-          final preset = WahaSettings.builtInGateways[name];
-          if (preset == null) continue;
-          final key = _settings.gatewayKeys[name] ?? '';
-          if (key.isEmpty && name != 'Pollinations') continue;
-          attempts.add(AIService(
-            endpoint: preset['endpoint']!,
-            apiKey: key,
-            model: preset['model']!,
-            provider: name,
-          ));
+          for (final c in _settings.customProviders) {
+            if (c.name == name && c.endpoint.trim().isNotEmpty) {
+              ordered.add(c);
+              used.add(c.name);
+              break;
+            }
+          }
         }
-        if (attempts.isEmpty) {
-          final p = WahaSettings.builtInGateways['Pollinations']!;
+        for (final c in _settings.customProviders) {
+          if (!used.contains(c.name) && c.endpoint.trim().isNotEmpty) {
+            ordered.add(c);
+          }
+        }
+        for (final c in ordered) {
           attempts.add(AIService(
-            endpoint: p['endpoint']!,
-            apiKey: '',
-            model: p['model']!,
-            provider: 'Pollinations',
+            endpoint: c.endpoint,
+            apiKey: c.apiKey,
+            model: c.model.isEmpty ? 'gpt-4o-mini' : c.model,
+            provider: c.name,
           ));
         }
       } else {
@@ -841,7 +842,7 @@ class _ChatPageState extends State<ChatPage> {
           endpoint: _settings.endpoint,
           apiKey: _settings.apiKey,
           model: _settings.model,
-          provider: _settings.provider,
+          provider: _settings.provider.isEmpty ? 'يدوي' : _settings.provider,
         ));
       }
 
@@ -887,8 +888,7 @@ class _ChatPageState extends State<ChatPage> {
               '• النموذج: ${_settings.model}\n'
               '• المزود: ${_settings.provider}\n'
               '• اتصال الإنترنت مفعّل للتطبيق\n\n'
-              'نصيحة: جرّب OpenRouter مع نموذج openai/gpt-4o-mini '
-              'واضغط «اختبار الاتصال» في الإعدادات.';
+              'نصيحة: تأكد من صحة Endpoint وAPI Key واضغط «اختبار الاتصال».';
         });
       }
     } finally {
@@ -1481,18 +1481,61 @@ class _ChatPageState extends State<ChatPage> {
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             Text(
-              _settings.isGateway
-                  ? 'بوابة ذكية · تبديل تلقائي'
-                  : 'المزود: ${_settings.provider}',
+              !_settings.connectionEnabled
+                  ? 'متوقف'
+                  : _settings.isGateway
+                      ? 'بوابة ذكية · ${_settings.customProviders.length} مزود'
+                      : (_settings.provider.isEmpty
+                          ? 'مزود يدوي'
+                          : 'المزود: ${_settings.provider}'),
               style: TextStyle(
                 fontSize: 11,
-                color: AppColors.textSecondary,
+                color: _settings.connectionEnabled
+                    ? Colors.green.shade700
+                    : AppColors.textSecondary,
                 fontWeight: FontWeight.w400,
               ),
             ),
           ],
         ),
         actions: [
+          // زر تشغيل / إيقاف مع ضوء أخضر
+          IconButton(
+            tooltip: _settings.connectionEnabled ? 'إيقاف الاتصال' : 'تشغيل الاتصال',
+            onPressed: _toggleConnection,
+            icon: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(
+                  _settings.connectionEnabled
+                      ? Icons.power_settings_new
+                      : Icons.power_settings_new_outlined,
+                  color: _settings.connectionEnabled
+                      ? Colors.green.shade600
+                      : Colors.grey.shade500,
+                ),
+                if (_settings.connectionEnabled)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: Colors.greenAccent.shade400,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.green.withOpacity(0.7),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
           IconButton(
             tooltip: 'Skills',
             onPressed: _showSkillsSheet,
@@ -1677,63 +1720,6 @@ class _ConnectedAppsSheetState extends State<ConnectedAppsSheet> {
 // ───────────────────────────── شاشة الإعدادات ─────────────────────────────
 
 
-class _GatewayKeyTile extends StatefulWidget {
-  final String name;
-  final bool enabled;
-  final String initialKey;
-  final ValueChanged<String> onChanged;
-
-  const _GatewayKeyTile({
-    required this.name,
-    required this.enabled,
-    required this.initialKey,
-    required this.onChanged,
-  });
-
-  @override
-  State<_GatewayKeyTile> createState() => _GatewayKeyTileState();
-}
-
-class _GatewayKeyTileState extends State<_GatewayKeyTile> {
-  late TextEditingController _c;
-
-  @override
-  void initState() {
-    super.initState();
-    _c = TextEditingController(text: widget.initialKey);
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: TextField(
-        controller: _c,
-        enabled: widget.enabled,
-        obscureText: true,
-        textDirection: TextDirection.ltr,
-        textAlign: TextAlign.left,
-        style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-        onChanged: widget.onChanged,
-        decoration: InputDecoration(
-          labelText: widget.enabled
-              ? '${widget.name} API Key'
-              : '${widget.name} (بدون مفتاح)',
-          border: const OutlineInputBorder(),
-          isDense: true,
-          prefixIcon: const Icon(Icons.key_outlined, size: 20),
-        ),
-      ),
-    );
-  }
-}
-
 class SettingsPage extends StatefulWidget {
   final WahaSettings settings;
 
@@ -1755,50 +1741,14 @@ class _SettingsPageState extends State<SettingsPage> {
   late String _provider;
   late String _mode;
   late bool _streamEnabled;
+  late bool _connectionEnabled;
   late List<ProviderConfig> _customProviders;
-  late Map<String, String> _gatewayKeys;
   late List<String> _gatewayOrder;
   bool _testing = false;
   String? _testResult;
   bool _showAddCustom = false;
   bool _obscureApiKey = true;
   bool _obscureAddApiKey = true;
-
-  static const _singleProviders = {
-    'مجاني بدون مفتاح (Pollinations)': {
-      'endpoint': 'https://text.pollinations.ai',
-      'model': 'openai',
-    },
-    'Groq (مجاني)': {
-      'endpoint': 'https://api.groq.com/openai/v1',
-      'model': 'llama-3.3-70b-versatile',
-    },
-    'OpenRouter (مجاني)': {
-      'endpoint': 'https://openrouter.ai/api/v1',
-      'model': 'openrouter/free',
-    },
-    'Google Gemini (مجاني)': {
-      'endpoint':
-          'https://generativelanguage.googleapis.com/v1beta/openai',
-      'model': 'gemini-2.0-flash',
-    },
-    'DeepSeek': {
-      'endpoint': 'https://api.deepseek.com/v1',
-      'model': 'deepseek-chat',
-    },
-    'Mistral': {
-      'endpoint': 'https://api.mistral.ai/v1',
-      'model': 'mistral-small-latest',
-    },
-    'OpenAI': {
-      'endpoint': 'https://api.openai.com/v1',
-      'model': 'gpt-4o-mini',
-    },
-    'يدوي (Custom)': {
-      'endpoint': '',
-      'model': '',
-    },
-  };
 
   @override
   void initState() {
@@ -1807,15 +1757,20 @@ class _SettingsPageState extends State<SettingsPage> {
     _provider = s.provider;
     _mode = s.isGateway ? 'gateway' : 'single';
     _streamEnabled = s.streamEnabled;
+    _connectionEnabled = s.connectionEnabled;
     _customProviders = List<ProviderConfig>.from(s.customProviders);
-    _gatewayKeys = Map<String, String>.from(s.gatewayKeys);
-    _gatewayOrder = List<String>.from(s.gatewayOrder);
+    // ترتيب البوابة = أسماء المزودين المحفوظين
+    _gatewayOrder = List<String>.from(
+      s.gatewayOrder.where((n) => _customProviders.any((c) => c.name == n)),
+    );
+    for (final c in _customProviders) {
+      if (!_gatewayOrder.contains(c.name)) _gatewayOrder.add(c.name);
+    }
     _endpointController = TextEditingController(text: s.endpoint);
     _apiKeyController = TextEditingController(text: s.apiKey);
     _modelController = TextEditingController(text: s.model);
     _systemController = TextEditingController(text: s.systemPrompt);
     _customNameController = TextEditingController();
-    // حقول الإضافة دائماً فارغة
     _addEndpointController = TextEditingController();
     _addApiKeyController = TextEditingController();
     _addModelController = TextEditingController();
@@ -1834,40 +1789,16 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
-  List<String> get _allProviderNames {
-    final names = <String>['WHAH Gateway'];
-    names.addAll(_singleProviders.keys);
-    for (final c in _customProviders) {
-      if (c.name.isNotEmpty) names.add(c.name);
-    }
-    return names;
+  List<String> get _providerNames {
+    return _customProviders.map((c) => c.name).where((n) => n.isNotEmpty).toList();
   }
 
-  void _applyProvider(String provider) {
+  void _applyProvider(String name) {
     setState(() {
-      _provider = provider;
-      if (provider == 'WHAH Gateway') {
-        _mode = 'gateway';
-        return;
-      }
+      _provider = name;
       _mode = 'single';
-      final preset = _singleProviders[provider];
-      if (preset != null) {
-        if (preset['endpoint']!.isNotEmpty) {
-          _endpointController.text = preset['endpoint']!;
-        }
-        if (preset['model']!.isNotEmpty) {
-          _modelController.text = preset['model']!;
-        }
-        if (provider.contains('بدون مفتاح') ||
-            provider.contains('Pollinations')) {
-          _apiKeyController.clear();
-        }
-        return;
-      }
-      // مزود يدوي محفوظ
       for (final c in _customProviders) {
-        if (c.name == provider) {
+        if (c.name == name) {
           _endpointController.text = c.endpoint;
           _apiKeyController.text = c.apiKey;
           _modelController.text = c.model;
@@ -1877,7 +1808,7 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  void _saveCustomProvider() {
+  Future<void> _saveCustomProvider() async {
     final name = _customNameController.text.trim();
     final endpoint = _addEndpointController.text.trim();
     final model = _addModelController.text.trim();
@@ -1894,26 +1825,28 @@ class _SettingsPageState extends State<SettingsPage> {
       );
       return;
     }
+    final cfg = ProviderConfig(
+      name: name,
+      endpoint: endpoint,
+      apiKey: key,
+      model: model.isEmpty ? 'gpt-4o-mini' : model,
+    );
     setState(() {
       final idx = _customProviders.indexWhere((e) => e.name == name);
-      final cfg = ProviderConfig(
-        name: name,
-        endpoint: endpoint,
-        apiKey: key,
-        model: model.isEmpty ? 'gpt-4o-mini' : model,
-      );
       if (idx >= 0) {
         _customProviders[idx] = cfg;
       } else {
         _customProviders.add(cfg);
+        if (!_gatewayOrder.contains(name)) _gatewayOrder.add(name);
       }
-      // تطبيق المزود الجديد مباشرة
+      // تطبيق المزود الجديد مباشرة وإظهاره في القائمة
       _provider = name;
-      _mode = 'single';
+      if (_mode != 'gateway') {
+        _mode = 'single';
+      }
       _endpointController.text = cfg.endpoint;
       _apiKeyController.text = cfg.apiKey;
       _modelController.text = cfg.model;
-      // إفراغ حقول الإضافة
       _showAddCustom = false;
       _customNameController.clear();
       _addEndpointController.clear();
@@ -1921,8 +1854,28 @@ class _SettingsPageState extends State<SettingsPage> {
       _addModelController.clear();
       _obscureAddApiKey = true;
     });
+
+    // حفظ فوري في التخزين المحلي حتى يظهر بعد إعادة الفتح
+    final settings = WahaSettings(
+      mode: _mode,
+      provider: _mode == 'gateway' ? 'بوابة ذكية' : name,
+      endpoint: cfg.endpoint,
+      apiKey: cfg.apiKey,
+      model: cfg.model,
+      streamEnabled: _streamEnabled,
+      systemPrompt: _systemController.text.trim(),
+      customProviders: List<ProviderConfig>.from(_customProviders),
+      gatewayOrder: List<String>.from(_gatewayOrder),
+      connectionEnabled: _connectionEnabled,
+    );
+    await LocalStorage.saveSettings(settings);
+
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('تم حفظ المزود «$name» مع المزودين')),
+      SnackBar(
+        content: Text('تم حفظ «$name» وإضافته للقائمة (${_customProviders.length} مزود)'),
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
@@ -1934,50 +1887,44 @@ class _SettingsPageState extends State<SettingsPage> {
 
     try {
       if (_mode == 'gateway') {
-        // اختبر أول مزود متاح في البوابة
+        if (_customProviders.isEmpty) {
+          setState(() =>
+              _testResult = '❌ أضف مزوداً واحداً على الأقل للبوابة');
+          return;
+        }
         String? err;
-        var any = false;
         for (final name in _gatewayOrder) {
-          final preset = WahaSettings.builtInGateways[name];
-          if (preset == null) continue;
-          final key = _gatewayKeys[name] ?? '';
-          if (key.isEmpty && name != 'Pollinations') continue;
-          any = true;
+          ProviderConfig? cfg;
+          for (final c in _customProviders) {
+            if (c.name == name) {
+              cfg = c;
+              break;
+            }
+          }
+          if (cfg == null || cfg.endpoint.trim().isEmpty) continue;
           final service = AIService(
-            endpoint: preset['endpoint']!,
-            apiKey: key,
-            model: preset['model']!,
-            provider: name,
+            endpoint: cfg.endpoint,
+            apiKey: cfg.apiKey,
+            model: cfg.model.isEmpty ? 'gpt-4o-mini' : cfg.model,
+            provider: cfg.name,
           );
           final e = await service.testConnectionDetailed();
           if (e == null) {
-            setState(() => _testResult = '✅ البوابة تعمل — نجح: $name');
+            setState(() => _testResult = '✅ البوابة تعمل — نجح: ${cfg!.name}');
             return;
           }
           err = e;
         }
-        if (!any) {
-          setState(() =>
-              _testResult = '❌ أضف مفتاحاً لمزود واحد على الأقل في البوابة');
-        } else {
-          setState(() => _testResult = '❌ فشل الاتصال: ${err ?? ""}');
-        }
+        setState(() => _testResult = '❌ فشل الاتصال: ${err ?? "لا مزودين صالحين"}');
         return;
       }
 
       final endpoint = _endpointController.text.trim();
       final apiKey = _apiKeyController.text.trim();
       final model = _modelController.text.trim();
-      final noKeyOk = _provider.contains('بدون مفتاح') ||
-          _provider.contains('Pollinations') ||
-          _provider.contains('يدوي');
 
       if (endpoint.isEmpty) {
         setState(() => _testResult = '❌ أدخل الرابط أولاً');
-        return;
-      }
-      if (apiKey.isEmpty && !noKeyOk) {
-        setState(() => _testResult = '❌ أدخل API Key');
         return;
       }
       if (model.isEmpty) {
@@ -1989,7 +1936,7 @@ class _SettingsPageState extends State<SettingsPage> {
         endpoint: endpoint,
         apiKey: apiKey,
         model: model,
-        provider: _provider,
+        provider: _provider.isEmpty ? 'يدوي' : _provider,
       );
       final err = await service.testConnectionDetailed();
       setState(() {
@@ -2005,15 +1952,17 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _save() async {
     final settings = WahaSettings(
       mode: _mode,
-      provider: _mode == 'gateway' ? 'WHAH Gateway' : _provider,
+      provider: _mode == 'gateway'
+          ? 'بوابة ذكية'
+          : (_provider.isEmpty ? 'يدوي' : _provider),
       endpoint: _endpointController.text.trim(),
       apiKey: _apiKeyController.text.trim(),
       model: _modelController.text.trim(),
       streamEnabled: _streamEnabled,
       systemPrompt: _systemController.text.trim(),
       customProviders: _customProviders,
-      gatewayKeys: _gatewayKeys,
       gatewayOrder: _gatewayOrder,
+      connectionEnabled: _connectionEnabled,
     );
     await LocalStorage.saveSettings(settings);
     if (!mounted) return;
@@ -2056,7 +2005,6 @@ class _SettingsPageState extends State<SettingsPage> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      // شريط حفظ ثابت أسفل الشاشة (بعيد عن أزرار النظام)
       bottomNavigationBar: SafeArea(
         child: Container(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -2101,6 +2049,91 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
+          // ── تشغيل / إيقاف الاتصال ──
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: _connectionEnabled
+                  ? const Color(0xFFE8F8EE)
+                  : const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _connectionEnabled
+                    ? Colors.green.shade300
+                    : AppColors.border,
+              ),
+            ),
+            child: Row(
+              children: [
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      Icons.power_settings_new,
+                      size: 28,
+                      color: _connectionEnabled
+                          ? Colors.green.shade600
+                          : Colors.grey.shade500,
+                    ),
+                    if (_connectionEnabled)
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: Colors.greenAccent.shade400,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.green.withOpacity(0.6),
+                                blurRadius: 5,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _connectionEnabled ? 'الاتصال يعمل' : 'الاتصال متوقف',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: _connectionEnabled
+                              ? Colors.green.shade800
+                              : AppColors.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        _connectionEnabled
+                            ? 'اضغط لإيقاف الاتصال'
+                            : 'اضغط لتشغيل الاتصال',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _connectionEnabled,
+                  activeThumbColor: Colors.green,
+                  activeTrackColor: Colors.green.shade200,
+                  onChanged: (v) => setState(() => _connectionEnabled = v),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
           // وضع التشغيل
           const Text('وضع التشغيل',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -2123,7 +2156,11 @@ class _SettingsPageState extends State<SettingsPage> {
               setState(() {
                 _mode = s.first;
                 if (_mode == 'gateway') {
-                  _provider = 'WHAH Gateway';
+                  _provider = 'بوابة ذكية';
+                } else if (_providerNames.isNotEmpty) {
+                  if (!_providerNames.contains(_provider)) {
+                    _applyProvider(_providerNames.first);
+                  }
                 }
               });
             },
@@ -2138,204 +2175,157 @@ class _SettingsPageState extends State<SettingsPage> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Text(
-                'المستخدم ← WHAH Gateway ← اختيار تلقائي\n'
-                'Groq → Gemini → NVIDIA → Cerebras → OpenRouter → Pollinations\n'
-                'البروتوكول: HTTPS + REST + JSON + OpenAI API + SSE',
+                'البوابة الذكية تجرب المزودين اليدويين المحفوظين بالترتيب عند الفشل.\n'
+                'أضف مزودين من الأسفل ثم رتّبهم في القائمة.',
                 style: TextStyle(fontSize: 13, height: 1.45),
               ),
             ),
             const SizedBox(height: 12),
-            const Text('مفاتيح مزودي البوابة',
-                style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            ...WahaSettings.builtInGateways.entries.map((e) {
-              final name = e.key;
-              final needsKey = name != 'Pollinations';
-              return _GatewayKeyTile(
-                name: name,
-                enabled: needsKey,
-                initialKey: _gatewayKeys[name] ?? '',
-                onChanged: (v) => _gatewayKeys[name] = v,
-              );
-            }),
-          ] else ...[
-            // قائمة مزودين قريبة من الأعلى
-            const Text('المزود',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<String>(
-              // ignore: deprecated_member_use
-              value: _allProviderNames.contains(_provider)
-                  ? _provider
-                  : _allProviderNames.first,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.cloud_outlined),
-                isDense: true,
+            // زر تشغيل/إيقاف خاص بالبوابة
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: _connectionEnabled
+                    ? const Color(0xFFE8F8EE)
+                    : const Color(0xFFFFF3E0),
+                borderRadius: BorderRadius.circular(12),
               ),
-              items: _allProviderNames
-                  .map((p) => DropdownMenuItem(value: p, child: Text(p)))
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) _applyProvider(v);
-              },
+              child: Row(
+                children: [
+                  Icon(
+                    _connectionEnabled ? Icons.play_circle_filled : Icons.pause_circle_filled,
+                    color: _connectionEnabled ? Colors.green : Colors.orange,
+                    size: 32,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _connectionEnabled
+                          ? 'البوابة قيد التشغيل'
+                          : 'البوابة متوقفة',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  FilledButton.tonal(
+                    onPressed: () =>
+                        setState(() => _connectionEnabled = !_connectionEnabled),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _connectionEnabled
+                          ? Colors.red.shade50
+                          : Colors.green.shade50,
+                      foregroundColor: _connectionEnabled
+                          ? Colors.red.shade700
+                          : Colors.green.shade700,
+                    ),
+                    child: Text(_connectionEnabled ? 'إيقاف' : 'تشغيل'),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
-
-            // إضافة مزود يدوي — حقول فارغة دائماً
-            OutlinedButton.icon(
-              onPressed: () {
-                setState(() {
-                  _showAddCustom = !_showAddCustom;
-                  if (_showAddCustom) {
-                    // إفراغ الحقول عند الفتح
-                    _customNameController.clear();
-                    _addEndpointController.clear();
-                    _addApiKeyController.clear();
-                    _addModelController.clear();
-                    _obscureAddApiKey = true;
+            const Text('ترتيب مزودي البوابة (اسحب أو احذف)',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            if (_customProviders.isEmpty)
+              const Text(
+                'لا يوجد مزودون محفوظون. أضف مزوداً يدوياً أدناه.',
+                style: TextStyle(color: Colors.grey),
+              )
+            else
+              ReorderableListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _gatewayOrder.length,
+                onReorder: (oldIndex, newIndex) {
+                  setState(() {
+                    if (newIndex > oldIndex) newIndex--;
+                    final item = _gatewayOrder.removeAt(oldIndex);
+                    _gatewayOrder.insert(newIndex, item);
+                  });
+                },
+                itemBuilder: (context, index) {
+                  final name = _gatewayOrder[index];
+                  ProviderConfig? cfg;
+                  for (final c in _customProviders) {
+                    if (c.name == name) {
+                      cfg = c;
+                      break;
+                    }
                   }
-                });
-              },
-              icon: Icon(_showAddCustom ? Icons.close : Icons.add),
-              label: Text(
-                _showAddCustom ? 'إلغاء الإضافة' : 'إضافة مزود جديد',
-              ),
-            ),
-            if (_showAddCustom) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text(
-                      'مزود جديد (الحقول فارغة)',
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _customNameController,
-                      decoration: const InputDecoration(
-                        labelText: 'اسم المزود',
-                        hintText: 'مثال: شركتي / سيرفري / Claude API',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.badge_outlined),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _addEndpointController,
-                      textDirection: TextDirection.ltr,
-                      textAlign: TextAlign.left,
-                      keyboardType: TextInputType.url,
-                      style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
-                      decoration: const InputDecoration(
-                        labelText: 'API Endpoint (HTTPS)',
-                        hintText: 'https://api.example.com/v1',
-                        hintTextDirection: TextDirection.ltr,
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.link),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _addApiKeyController,
-                      obscureText: _obscureAddApiKey,
-                      textDirection: TextDirection.ltr,
-                      textAlign: TextAlign.left,
-                      style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
-                      decoration: InputDecoration(
-                        labelText: 'API Key',
-                        hintText: 'sk-...',
-                        hintTextDirection: TextDirection.ltr,
-                        border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(Icons.key_outlined),
-                        isDense: true,
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscureAddApiKey
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined,
-                          ),
-                          onPressed: () => setState(
-                            () => _obscureAddApiKey = !_obscureAddApiKey,
-                          ),
-                          tooltip: _obscureAddApiKey
-                              ? 'إظهار المفتاح'
-                              : 'إخفاء المفتاح',
+                  return ListTile(
+                    key: ValueKey(name),
+                    leading: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: AppColors.primary.withOpacity(0.15),
+                      child: Text(
+                        '${index + 1}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _addModelController,
+                    title: Text(name),
+                    subtitle: Text(
+                      cfg?.endpoint ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
                       textDirection: TextDirection.ltr,
-                      textAlign: TextAlign.left,
-                      style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
-                      decoration: const InputDecoration(
-                        labelText: 'Model (اختياري)',
-                        hintText: 'gpt-4o-mini',
-                        hintTextDirection: TextDirection.ltr,
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.smart_toy_outlined),
-                        isDense: true,
-                      ),
                     ),
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: _saveCustomProvider,
-                      icon: const Icon(Icons.playlist_add_check),
-                      label: const Text('حفظ المزود في القائمة'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (_customProviders.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              const Text('المزودون المحفوظون',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: _customProviders.map((c) {
-                  return InputChip(
-                    label: Text(c.name),
-                    selected: _provider == c.name,
-                    onSelected: (_) => _applyProvider(c.name),
-                    onDeleted: () {
-                      setState(() {
-                        _customProviders.removeWhere((e) => e.name == c.name);
-                        if (_provider == c.name) {
-                          _provider = 'Groq (مجاني)';
-                          _applyProvider(_provider);
-                        }
-                      });
-                    },
+                    trailing: const Icon(Icons.drag_handle),
+                    dense: true,
                   );
-                }).toList(),
+                },
               ),
-            ],
-            const SizedBox(height: 14),
+          ] else ...[
+            // مزود واحد — اختيار يدوي من المحفوظين
+            const Text('اختر مزوداً محفوظاً',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 8),
+            if (_providerNames.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8E1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text(
+                  'لا يوجد مزودون محفوظون. أضف مزوداً يدوياً أدناه ثم اختره.',
+                  style: TextStyle(fontSize: 13),
+                ),
+              )
+            else
+              DropdownButtonFormField<String>(
+                key: ValueKey('providers_${_providerNames.join("|")}'),
+                // ignore: deprecated_member_use
+                value: _providerNames.contains(_provider)
+                    ? _provider
+                    : null,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.cloud_outlined),
+                  isDense: true,
+                  hintText: 'اختر مزوداً',
+                ),
+                items: _providerNames
+                    .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) _applyProvider(v);
+                },
+              ),
+            const SizedBox(height: 12),
             _ltrField(
               controller: _endpointController,
               label: 'API Endpoint (HTTPS)',
-              hint: 'https://api.groq.com/openai/v1',
+              hint: 'https://api.example.com/v1',
               keyboardType: TextInputType.url,
               icon: Icons.link,
             ),
             const SizedBox(height: 10),
-            // API Key مع إمكانية الإظهار
             TextField(
               controller: _apiKeyController,
               obscureText: _obscureApiKey,
@@ -2365,10 +2355,257 @@ class _SettingsPageState extends State<SettingsPage> {
             _ltrField(
               controller: _modelController,
               label: 'Model',
-              hint: 'llama-3.3-70b-versatile',
+              hint: 'gpt-4o-mini',
               icon: Icons.smart_toy_outlined,
             ),
           ],
+
+          const SizedBox(height: 16),
+          // إضافة مزود يدوي
+          OutlinedButton.icon(
+            onPressed: () {
+              setState(() {
+                _showAddCustom = !_showAddCustom;
+                if (_showAddCustom) {
+                  _customNameController.clear();
+                  _addEndpointController.clear();
+                  _addApiKeyController.clear();
+                  _addModelController.clear();
+                  _obscureAddApiKey = true;
+                }
+              });
+            },
+            icon: Icon(_showAddCustom ? Icons.close : Icons.add),
+            label: Text(
+              _showAddCustom ? 'إلغاء الإضافة' : 'إضافة مزود يدوي جديد',
+            ),
+          ),
+          if (_showAddCustom) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'مزود جديد — أدخل البيانات يدوياً',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _customNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'اسم المزود',
+                      hintText: 'مثال: شركتي / سيرفري / Claude',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.badge_outlined),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _addEndpointController,
+                    textDirection: TextDirection.ltr,
+                    textAlign: TextAlign.left,
+                    keyboardType: TextInputType.url,
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+                    decoration: const InputDecoration(
+                      labelText: 'API Endpoint (HTTPS)',
+                      hintText: 'https://api.example.com/v1',
+                      hintTextDirection: TextDirection.ltr,
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.link),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _addApiKeyController,
+                    obscureText: _obscureAddApiKey,
+                    textDirection: TextDirection.ltr,
+                    textAlign: TextAlign.left,
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+                    decoration: InputDecoration(
+                      labelText: 'API Key',
+                      hintText: 'sk-...',
+                      hintTextDirection: TextDirection.ltr,
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.key_outlined),
+                      isDense: true,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureAddApiKey
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                        onPressed: () => setState(
+                          () => _obscureAddApiKey = !_obscureAddApiKey,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _addModelController,
+                    textDirection: TextDirection.ltr,
+                    textAlign: TextAlign.left,
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+                    decoration: const InputDecoration(
+                      labelText: 'Model',
+                      hintText: 'gpt-4o-mini',
+                      hintTextDirection: TextDirection.ltr,
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.smart_toy_outlined),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: _saveCustomProvider,
+                    icon: const Icon(Icons.playlist_add_check),
+                    label: const Text('حفظ المزود في القائمة'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // قائمة المزودين المحفوظين — دائماً ظاهرة
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Text('المزودون المحفوظون',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${_customProviders.length}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primary,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_customProviders.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.shade200),
+              ),
+              child: const Text(
+                'لا يوجد مزودون بعد.\n'
+                'اضغط «إضافة مزود يدوي جديد» بالأعلى ثم احفظه ليظهر هنا.',
+                style: TextStyle(fontSize: 13, height: 1.4),
+              ),
+            )
+          else
+            Column(
+              children: _customProviders.map((c) {
+                final selected = _mode == 'single' && _provider == c.name;
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  elevation: selected ? 2 : 0,
+                  color: selected
+                      ? AppColors.primary.withOpacity(0.08)
+                      : AppColors.surface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.border,
+                      width: selected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: ListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    leading: Icon(
+                      selected
+                          ? Icons.check_circle
+                          : Icons.cloud_outlined,
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.textSecondary,
+                    ),
+                    title: Text(
+                      c.name,
+                      style: TextStyle(
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
+                    ),
+                    subtitle: Text(
+                      c.endpoint,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                      ),
+                      textDirection: TextDirection.ltr,
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      tooltip: 'حذف',
+                      onPressed: () async {
+                        setState(() {
+                          _customProviders
+                              .removeWhere((e) => e.name == c.name);
+                          _gatewayOrder.remove(c.name);
+                          if (_provider == c.name) {
+                            _provider = '';
+                            _endpointController.clear();
+                            _apiKeyController.clear();
+                            _modelController.clear();
+                            if (_providerNames.isNotEmpty) {
+                              _applyProvider(_providerNames.first);
+                            }
+                          }
+                        });
+                        // حفظ فوري بعد الحذف
+                        final s = WahaSettings(
+                          mode: _mode,
+                          provider: _provider.isEmpty ? 'يدوي' : _provider,
+                          endpoint: _endpointController.text.trim(),
+                          apiKey: _apiKeyController.text.trim(),
+                          model: _modelController.text.trim(),
+                          streamEnabled: _streamEnabled,
+                          systemPrompt: _systemController.text.trim(),
+                          customProviders:
+                              List<ProviderConfig>.from(_customProviders),
+                          gatewayOrder: List<String>.from(_gatewayOrder),
+                          connectionEnabled: _connectionEnabled,
+                        );
+                        await LocalStorage.saveSettings(s);
+                      },
+                    ),
+                    onTap: () {
+                      if (_mode == 'single') {
+                        _applyProvider(c.name);
+                      }
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
 
           const SizedBox(height: 14),
           TextField(
@@ -2411,12 +2648,12 @@ class _SettingsPageState extends State<SettingsPage> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Text(
-              'البروتوكول: HTTPS · REST API · JSON · OpenAI-compatible · SSE\n'
-              'البوابة تجرب المزودين بالترتيب وتسقط تلقائياً عند الفشل.',
+              'الاتصال يدوي بالكامل: أضف مزودك (Endpoint + API Key + Model).\n'
+              'لا توجد مزودات مدمجة — أنت تتحكم بكل شيء.\n'
+              'البروتوكول: HTTPS · REST · JSON · OpenAI-compatible · SSE',
               style: TextStyle(fontSize: 12.5, height: 1.4),
             ),
           ),
-          // مساحة إضافية فوق شريط الحفظ
           const SizedBox(height: 16),
         ],
       ),
