@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -272,7 +273,15 @@ class WahaSettings {
     this.model = 'llama-3.3-70b-versatile',
     this.streamEnabled = true,
     this.systemPrompt =
-        'أنت مساعد ذكي اسمه WHAH AI. أجب بالعربية بشكل واضح ومفيد. يمكنك كتابة كود، تحليل بيانات، وتحويل مستندات.',
+        'أنت WHAH AI — مساعد ذكي متعدد القدرات. تعرّف تلقائياً على نوع السؤال وأجب بالشكل الأنسب:\n'
+        '• برمجة: اكتب كوداً نظيفاً بأي لغة (Python, JS, Dart, Java, C++, SQL...) مع شرح مختصر.\n'
+        '• صور: صف الصور المرفقة أو اقترح prompts لتوليد صور.\n'
+        '• فيديو/مونتاج: سيناريوهات، خطط تحرير، وصف مشاهد.\n'
+        '• مالية/فواتير: حلّل الأرقام والبنود بدقة.\n'
+        '• ترجمة: ترجم لأي لغة مع الحفاظ على الأسلوب.\n'
+        '• كتب/قصص/تقارير: نظّم المحتوى بعناوين وفقرات جاهزة للتصدير.\n'
+        '• وسائل تواصل: منشورات مناسبة للمنصة.\n'
+        'أجب بالعربية إلا إذا طُلب غير ذلك. كن واضحاً ومفيداً ومختصراً عند الإمكان.',
     List<ProviderConfig>? customProviders,
     Map<String, String>? gatewayKeys,
     List<String>? gatewayOrder,
@@ -483,28 +492,44 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoading = false;
   bool _ready = false;
 
-  // Skills — مهارات جاهزة حسب الفئة
+  // Skills — مهارات جاهزة حسب الفئة (موسّعة)
   final List<Map<String, String>> _skills = [
-    {'title': 'كتابة كود', 'cat': 'برمجة', 'icon': 'code', 'prompt': 'اكتب كوداً نظيفاً وقابلاً للتشغيل مع تعليقات مختصرة. المطلوب:\n'},
-    {'title': 'إصلاح أخطاء', 'cat': 'برمجة', 'icon': 'bug', 'prompt': 'حلل الخطأ التالي، حدد السبب، وقدّم الكود المصحح:\n'},
-    {'title': 'مراجعة كود', 'cat': 'برمجة', 'icon': 'review', 'prompt': 'راجع الكود من ناحية الأمان والأداء والوضوح مع تحسينات:\n'},
+    // برمجة بكل اللغات
+    {'title': 'كتابة كود', 'cat': 'برمجة', 'icon': 'code', 'prompt': 'اكتب كوداً نظيفاً وقابلاً للتشغيل مع تعليقات. حدد اللغة تلقائياً حسب الطلب:\n'},
+    {'title': 'Python', 'cat': 'برمجة', 'icon': 'code', 'prompt': 'كمطور Python خبير، نفّذ المطلوب بكود حديث وواضح:\n'},
+    {'title': 'JavaScript/TS', 'cat': 'برمجة', 'icon': 'code', 'prompt': 'كمطور JavaScript/TypeScript، اكتب كوداً حديثاً (ES2022+):\n'},
     {'title': 'Flutter / Dart', 'cat': 'برمجة', 'icon': 'phone', 'prompt': 'كمطور Flutter خبير، نفّذ المطلوب بكود Dart حديث:\n'},
-    {'title': 'تحليل بيانات', 'cat': 'بيانات', 'icon': 'analytics', 'prompt': 'حلل البيانات: ملخص، إحصائيات، أنماط، واستنتاجات:\n'},
-    {'title': 'جداول Excel', 'cat': 'بيانات', 'icon': 'table', 'prompt': 'نظّم البيانات كجدول Markdown بأعمدة واضحة:\n'},
-    {'title': 'SQL / استعلام', 'cat': 'بيانات', 'icon': 'storage', 'prompt': 'اكتب استعلام SQL فعال مع شرح الشروط:\n'},
-    {'title': 'تحويل مستند', 'cat': 'مستندات', 'icon': 'description', 'prompt': 'حوّل المحتوى إلى Markdown منظم بعناوين وقوائم:\n'},
+    {'title': 'Java / Kotlin', 'cat': 'برمجة', 'icon': 'code', 'prompt': 'اكتب كود Java أو Kotlin نظيفاً حسب الطلب:\n'},
+    {'title': 'C / C++ / Rust', 'cat': 'برمجة', 'icon': 'code', 'prompt': 'اكتب كوداً آمناً وعالي الأداء بلغة الأنظمة المطلوبة:\n'},
+    {'title': 'SQL / قواعد بيانات', 'cat': 'برمجة', 'icon': 'storage', 'prompt': 'اكتب استعلام SQL أو تصميم قاعدة بيانات فعال:\n'},
+    {'title': 'إصلاح أخطاء', 'cat': 'برمجة', 'icon': 'bug', 'prompt': 'حلل الخطأ، حدد السبب الجذري، وقدّم الكود المصحح مع شرح:\n'},
+    {'title': 'مراجعة كود', 'cat': 'برمجة', 'icon': 'review', 'prompt': 'راجع الكود: أمان، أداء، وضوح، وأفضل الممارسات:\n'},
+    // تحليل
+    {'title': 'تحليل مشاكل', 'cat': 'تحليل', 'icon': 'analytics', 'prompt': 'حلّل المشكلة خطوة بخطوة: الأسباب، التأثير، الحلول المقترحة:\n'},
+    {'title': 'تحليل بيانات', 'cat': 'تحليل', 'icon': 'analytics', 'prompt': 'حلل البيانات: ملخص، إحصائيات، أنماط، واستنتاجات:\n'},
+    {'title': 'فواتير وحسابات', 'cat': 'مالية', 'icon': 'table', 'prompt': 'حلّل الفاتورة أو الحسابات: بنود، إجماليات، ملاحظات، وتنظيم:\n'},
+    {'title': 'تقارير مالية', 'cat': 'مالية', 'icon': 'report', 'prompt': 'أنشئ تقريراً مالياً واضحاً (إيرادات، مصروفات، رصيد) من البيانات:\n'},
+    // مستندات وكتب
+    {'title': 'توليد كتاب', 'cat': 'مستندات', 'icon': 'description', 'prompt': 'اكتب كتاباً أو فصلاً منظماً (عناوين، فقرات، خلاصة) عن:\n'},
+    {'title': 'قصة قصيرة', 'cat': 'مستندات', 'icon': 'edit', 'prompt': 'اكتب قصة قصيرة مشوّقة ببداية وعقدة ونهاية:\n'},
+    {'title': 'تحويل إلى PDF/Markdown', 'cat': 'مستندات', 'icon': 'description', 'prompt': 'حوّل المحتوى إلى Markdown منظم جاهز للتصدير كـ PDF:\n'},
     {'title': 'تلخيص', 'cat': 'مستندات', 'icon': 'summarize', 'prompt': 'لخّص النص بنقاط واضحة مع أهم الأفكار:\n'},
-    {'title': 'إعادة صياغة', 'cat': 'مستندات', 'icon': 'edit', 'prompt': 'أعد صياغة النص بأسلوب احترافي مع الحفاظ على المعنى:\n'},
-    {'title': 'تقرير', 'cat': 'مستندات', 'icon': 'report', 'prompt': 'اكتب تقريراً (مقدمة، نقاط، خلاصة) عن:\n'},
-    {'title': 'ترجمة للعربية', 'cat': 'لغة', 'icon': 'translate', 'prompt': 'ترجم النص التالي إلى العربية الفصحى بدقة:\n'},
-    {'title': 'ترجمة للإنجليزية', 'cat': 'لغة', 'icon': 'translate', 'prompt': 'Translate the following text to clear professional English:\n'},
+    {'title': 'قالب جاهز', 'cat': 'مستندات', 'icon': 'report', 'prompt': 'أنشئ قالباً احترافياً (عقد، خطاب، تقرير، سيرة) لـ:\n'},
+    // ترجمة
+    {'title': 'ترجمة لأي لغة', 'cat': 'لغة', 'icon': 'translate', 'prompt': 'ترجم النص بدقة إلى اللغة المطلوبة مع الحفاظ على الأسلوب:\n'},
+    {'title': 'ترجمة للعربية', 'cat': 'لغة', 'icon': 'translate', 'prompt': 'ترجم إلى العربية الفصحى بدقة ووضوح:\n'},
+    {'title': 'ترجمة للإنجليزية', 'cat': 'لغة', 'icon': 'translate', 'prompt': 'Translate to clear professional English:\n'},
     {'title': 'تدقيق لغوي', 'cat': 'لغة', 'icon': 'spell', 'prompt': 'صحّح الأخطاء اللغوية والإملائية وقدّم النسخة المعدّلة:\n'},
-    {'title': 'أفكار', 'cat': 'إبداع', 'icon': 'lightbulb', 'prompt': 'اقترح 8 أفكار عملية وإبداعية حول:\n'},
-    {'title': 'وصف صورة', 'cat': 'إبداع', 'icon': 'image', 'prompt': 'Write a detailed English image-generation prompt about:\n'},
-    {'title': 'فكرة فيديو', 'cat': 'إبداع', 'icon': 'video', 'prompt': 'اكتب سيناريو فيديو قصير (مقاطع + نص شاشة) عن:\n'},
+    // إبداع ووسائط
+    {'title': 'توليد وصف صورة', 'cat': 'إبداع', 'icon': 'image', 'prompt': 'Write a detailed English image-generation prompt (style, lighting, composition):\n'},
+    {'title': 'تحليل صورة', 'cat': 'إبداع', 'icon': 'image', 'prompt': 'صف الصورة المرفقة بالتفصيل: محتوى، نص ظاهر، ألوان، سياق:\n'},
+    {'title': 'سيناريو فيديو', 'cat': 'إبداع', 'icon': 'video', 'prompt': 'اكتب سيناريو فيديو (مشاهد، حوار، نص شاشة، مدة تقريبية):\n'},
+    {'title': 'مونتاج / تحرير', 'cat': 'إبداع', 'icon': 'video', 'prompt': 'اقترح خطة مونتاج وتحرير (تسلسل، انتقالات، مؤثرات) لـ:\n'},
+    {'title': 'وسائل تواصل', 'cat': 'إبداع', 'icon': 'lightbulb', 'prompt': 'اكتب منشورات مناسبة لوسائل التواصل (تويتر، إنستغرام، لينكدإن) عن:\n'},
+    // تطوير
     {'title': 'README GitHub', 'cat': 'تطوير', 'icon': 'github', 'prompt': 'اكتب README.md احترافي (عربي/إنجليزي) للمشروع:\n'},
     {'title': 'API / JSON', 'cat': 'تطوير', 'icon': 'api', 'prompt': 'صمّم REST API بصيغة JSON مع أمثلة طلب واستجابة:\n'},
-    {'title': 'خطة تطبيق', 'cat': 'تطوير', 'icon': 'app', 'prompt': 'ضع خطة تطبيق (شاشات، ميزات، تقنية) للفكرة:\n'},
+    {'title': 'خطة تطبيق', 'cat': 'تطوير', 'icon': 'app', 'prompt': 'ضع خطة تطبيق (شاشات، ميزات، تقنية، مراحل) للفكرة:\n'},
   ];
 
 
@@ -743,11 +768,47 @@ class _ChatPageState extends State<ChatPage> {
 
       for (final m in _currentChat.messages) {
         if (m.role == 'assistant' && m.content.trim().isEmpty) continue;
-        if (m.content.trim().isEmpty) continue;
-        messages.add({
-          'role': m.role,
-          'content': m.content,
-        });
+        if (m.content.trim().isEmpty && m.files.isEmpty) continue;
+
+        // دعم الصور (vision) — إرسال base64 للنماذج الداعمة
+        final imageFiles = m.files.where((f) {
+          final n = f.name.toLowerCase();
+          return n.endsWith('.png') ||
+              n.endsWith('.jpg') ||
+              n.endsWith('.jpeg') ||
+              n.endsWith('.webp') ||
+              n.endsWith('.gif');
+        }).toList();
+
+        if (imageFiles.isNotEmpty && m.role == 'user') {
+          final parts = <Map<String, dynamic>>[];
+          parts.add({'type': 'text', 'text': m.content});
+          for (final f in imageFiles) {
+            try {
+              if (f.path.isEmpty) continue;
+              final bytes = await File(f.path).readAsBytes();
+              // حدّ أقصى ~4MB للصورة لتجنب تجاوز حدود API
+              if (bytes.length > 4 * 1024 * 1024) continue;
+              final b64 = base64Encode(bytes);
+              final mime = f.name.toLowerCase().endsWith('.png')
+                  ? 'image/png'
+                  : f.name.toLowerCase().endsWith('.webp')
+                      ? 'image/webp'
+                      : f.name.toLowerCase().endsWith('.gif')
+                          ? 'image/gif'
+                          : 'image/jpeg';
+              parts.add({
+                'type': 'image_url',
+                'image_url': {'url': 'data:$mime;base64,$b64'},
+              });
+            } catch (_) {
+              // تجاهل الصور غير القابلة للقراءة
+            }
+          }
+          messages.add({'role': m.role, 'content': parts});
+        } else {
+          messages.add({'role': m.role, 'content': m.content});
+        }
       }
 
       // محاولات: بوابة ذكية (تبديل تلقائي) أو مزود واحد
@@ -1412,11 +1473,31 @@ class _ChatPageState extends State<ChatPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          _currentChat.title,
-          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _currentChat.title,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            Text(
+              _settings.isGateway
+                  ? 'بوابة ذكية · تبديل تلقائي'
+                  : 'المزود: ${_settings.provider}',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Skills',
+            onPressed: _showSkillsSheet,
+            icon: const Icon(Icons.auto_awesome_outlined),
+          ),
           IconButton(
             tooltip: 'محادثة جديدة',
             onPressed: _newChat,
@@ -1668,6 +1749,9 @@ class _SettingsPageState extends State<SettingsPage> {
   late TextEditingController _modelController;
   late TextEditingController _systemController;
   late TextEditingController _customNameController;
+  late TextEditingController _addEndpointController;
+  late TextEditingController _addApiKeyController;
+  late TextEditingController _addModelController;
   late String _provider;
   late String _mode;
   late bool _streamEnabled;
@@ -1677,6 +1761,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _testing = false;
   String? _testResult;
   bool _showAddCustom = false;
+  bool _obscureApiKey = true;
+  bool _obscureAddApiKey = true;
 
   static const _singleProviders = {
     'مجاني بدون مفتاح (Pollinations)': {
@@ -1729,6 +1815,10 @@ class _SettingsPageState extends State<SettingsPage> {
     _modelController = TextEditingController(text: s.model);
     _systemController = TextEditingController(text: s.systemPrompt);
     _customNameController = TextEditingController();
+    // حقول الإضافة دائماً فارغة
+    _addEndpointController = TextEditingController();
+    _addApiKeyController = TextEditingController();
+    _addModelController = TextEditingController();
   }
 
   @override
@@ -1738,6 +1828,9 @@ class _SettingsPageState extends State<SettingsPage> {
     _modelController.dispose();
     _systemController.dispose();
     _customNameController.dispose();
+    _addEndpointController.dispose();
+    _addApiKeyController.dispose();
+    _addModelController.dispose();
     super.dispose();
   }
 
@@ -1786,9 +1879,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _saveCustomProvider() {
     final name = _customNameController.text.trim();
-    final endpoint = _endpointController.text.trim();
-    final model = _modelController.text.trim();
-    final key = _apiKeyController.text.trim();
+    final endpoint = _addEndpointController.text.trim();
+    final model = _addModelController.text.trim();
+    final key = _addApiKeyController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('أدخل اسم المزود أولاً')),
@@ -1807,20 +1900,29 @@ class _SettingsPageState extends State<SettingsPage> {
         name: name,
         endpoint: endpoint,
         apiKey: key,
-        model: model,
+        model: model.isEmpty ? 'gpt-4o-mini' : model,
       );
       if (idx >= 0) {
         _customProviders[idx] = cfg;
       } else {
         _customProviders.add(cfg);
       }
+      // تطبيق المزود الجديد مباشرة
       _provider = name;
       _mode = 'single';
+      _endpointController.text = cfg.endpoint;
+      _apiKeyController.text = cfg.apiKey;
+      _modelController.text = cfg.model;
+      // إفراغ حقول الإضافة
       _showAddCustom = false;
       _customNameController.clear();
+      _addEndpointController.clear();
+      _addApiKeyController.clear();
+      _addModelController.clear();
+      _obscureAddApiKey = true;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('تم حفظ المزود «$name»')),
+      SnackBar(content: Text('تم حفظ المزود «$name» مع المزودين')),
     );
   }
 
@@ -2081,35 +2183,128 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 12),
 
-            // إضافة مزود يدوي بالاسم
+            // إضافة مزود يدوي — حقول فارغة دائماً
             OutlinedButton.icon(
-              onPressed: () => setState(() => _showAddCustom = !_showAddCustom),
+              onPressed: () {
+                setState(() {
+                  _showAddCustom = !_showAddCustom;
+                  if (_showAddCustom) {
+                    // إفراغ الحقول عند الفتح
+                    _customNameController.clear();
+                    _addEndpointController.clear();
+                    _addApiKeyController.clear();
+                    _addModelController.clear();
+                    _obscureAddApiKey = true;
+                  }
+                });
+              },
               icon: Icon(_showAddCustom ? Icons.close : Icons.add),
               label: Text(
-                _showAddCustom ? 'إلغاء' : 'إضافة مزود يدوي (بالاسم)',
+                _showAddCustom ? 'إلغاء الإضافة' : 'إضافة مزود جديد',
               ),
             ),
             if (_showAddCustom) ...[
-              const SizedBox(height: 10),
-              TextField(
-                controller: _customNameController,
-                decoration: const InputDecoration(
-                  labelText: 'اسم المزود (يُحفظ بهذا الاسم)',
-                  hintText: 'مثال: شركتي / سيرفري',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.badge_outlined),
-                  isDense: true,
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
                 ),
-              ),
-              const SizedBox(height: 8),
-              FilledButton.tonalIcon(
-                onPressed: _saveCustomProvider,
-                icon: const Icon(Icons.playlist_add_check),
-                label: const Text('حفظ هذا المزود في القائمة'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'مزود جديد (الحقول فارغة)',
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _customNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'اسم المزود',
+                        hintText: 'مثال: شركتي / سيرفري / Claude API',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.badge_outlined),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _addEndpointController,
+                      textDirection: TextDirection.ltr,
+                      textAlign: TextAlign.left,
+                      keyboardType: TextInputType.url,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+                      decoration: const InputDecoration(
+                        labelText: 'API Endpoint (HTTPS)',
+                        hintText: 'https://api.example.com/v1',
+                        hintTextDirection: TextDirection.ltr,
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.link),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _addApiKeyController,
+                      obscureText: _obscureAddApiKey,
+                      textDirection: TextDirection.ltr,
+                      textAlign: TextAlign.left,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+                      decoration: InputDecoration(
+                        labelText: 'API Key',
+                        hintText: 'sk-...',
+                        hintTextDirection: TextDirection.ltr,
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.key_outlined),
+                        isDense: true,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscureAddApiKey
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                          onPressed: () => setState(
+                            () => _obscureAddApiKey = !_obscureAddApiKey,
+                          ),
+                          tooltip: _obscureAddApiKey
+                              ? 'إظهار المفتاح'
+                              : 'إخفاء المفتاح',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _addModelController,
+                      textDirection: TextDirection.ltr,
+                      textAlign: TextAlign.left,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+                      decoration: const InputDecoration(
+                        labelText: 'Model (اختياري)',
+                        hintText: 'gpt-4o-mini',
+                        hintTextDirection: TextDirection.ltr,
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.smart_toy_outlined),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: _saveCustomProvider,
+                      icon: const Icon(Icons.playlist_add_check),
+                      label: const Text('حفظ المزود في القائمة'),
+                    ),
+                  ],
+                ),
               ),
             ],
             if (_customProviders.isNotEmpty) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
+              const Text('المزودون المحفوظون',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -2140,12 +2335,31 @@ class _SettingsPageState extends State<SettingsPage> {
               icon: Icons.link,
             ),
             const SizedBox(height: 10),
-            _ltrField(
+            // API Key مع إمكانية الإظهار
+            TextField(
               controller: _apiKeyController,
-              label: 'API Key',
-              hint: 'sk-...',
-              obscure: true,
-              icon: Icons.key_outlined,
+              obscureText: _obscureApiKey,
+              textDirection: TextDirection.ltr,
+              textAlign: TextAlign.left,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+              decoration: InputDecoration(
+                labelText: 'API Key',
+                hintText: 'sk-...',
+                hintTextDirection: TextDirection.ltr,
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.key_outlined),
+                isDense: true,
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureApiKey
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                  onPressed: () =>
+                      setState(() => _obscureApiKey = !_obscureApiKey),
+                  tooltip: _obscureApiKey ? 'إظهار المفتاح' : 'إخفاء المفتاح',
+                ),
+              ),
             ),
             const SizedBox(height: 10),
             _ltrField(
