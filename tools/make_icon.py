@@ -9,7 +9,7 @@ os.makedirs("assets", exist_ok=True)
 def gradient(size):
     img = Image.new("RGB", (size, size))
     px = img.load()
-    c1, c2 = (59, 130, 246), (56, 189, 248)
+    c1, c2 = (201, 100, 66), (217, 119, 87)
     for y in range(size):
         for x in range(size):
             t = (x + y) / (2 * size)
