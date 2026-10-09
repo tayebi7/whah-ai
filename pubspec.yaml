@@ -2,10 +2,10 @@ name: whah_ai
 description: WHAH AI - مساعد ذكاء اصطناعي متعدد الاستخدامات
 publish_to: "none"
 
-version: 1.3.1+9
+version: 2.0.0+7
 
 environment:
-  sdk: ">=3.3.0 <4.0.0"
+  sdk: ">=3.6.0 <4.0.0"
 
 dependencies:
   flutter:
@@ -22,6 +22,10 @@ dependencies:
   uuid: ^4.5.1
   path_provider: ^2.1.5
   url_launcher: ^6.3.1
+  archive: ^3.6.1
+  video_player: ^2.9.2
+  video_thumbnail: ^0.5.3
+  share_plus: ^10.1.4
 
 dev_dependencies:
   flutter_test:
@@ -33,7 +37,7 @@ flutter_launcher_icons:
   android: true
   ios: false
   image_path: "assets/icon.png"
-  adaptive_icon_background: "#60A5FA"
+  adaptive_icon_background: "#C96442"
   adaptive_icon_foreground: "assets/icon_fg.png"
 
 flutter:
