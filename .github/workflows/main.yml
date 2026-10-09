@@ -53,6 +53,19 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      - name: Patch plugins that lack an Android namespace (AGP 8)
+        run: |
+          for f in $(find "$HOME/.pub-cache/hosted" -path '*/android/build.gradle' 2>/dev/null); do
+            if ! grep -q "namespace" "$f"; then
+              dir=$(dirname "$f")
+              pkg=$(grep -o 'package="[^"]*"' "$dir/src/main/AndroidManifest.xml" 2>/dev/null | head -1 | sed 's/package="\(.*\)"/\1/')
+              if [ -n "$pkg" ]; then
+                sed -i "0,/android {/s//android {\n    namespace \"$pkg\"/" "$f"
+                echo "patched $f -> $pkg"
+              fi
+            fi
+          done
+
       - name: Analyze Dart code
         run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
 
