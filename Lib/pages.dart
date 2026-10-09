@@ -1,1026 +1,1202 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 import 'ai_service.dart';
 import 'connectors.dart';
+import 'file_processor.dart';
+import 'intent.dart';
+import 'media_service.dart';
 import 'models.dart';
-import 'net_utils.dart';
+import 'pages.dart';
+import 'storage.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-// ═════════════════════════════ المزودون ═════════════════════════════
+class ChatPage extends StatefulWidget {
+  const ChatPage({super.key, this.onThemeChanged});
 
-class ProvidersPage extends StatefulWidget {
-  final List<ProviderConfig> providers;
-  final Future<void> Function(List<ProviderConfig>) onChanged;
-
-  const ProvidersPage({super.key, required this.providers, required this.onChanged});
+  final ValueChanged<String>? onThemeChanged;
 
   @override
-  State<ProvidersPage> createState() => _ProvidersPageState();
+  State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ProvidersPageState extends State<ProvidersPage> {
-  late List<ProviderConfig> _list;
+class _ChatPageState extends State<ChatPage> {
+  AppSettings _settings = AppSettings();
+  List<ProviderConfig> _providers = [];
+  List<Skill> _customSkills = [];
+  List<ConnectorConfig> _connectors = [];
+  List<ChatHistory> _history = [];
+  ChatHistory _chat = ChatHistory(title: 'محادثة جديدة');
+
+  Skill? _activeSkill;
+  final List<AttachedFile> _attached = [];
+  bool _busy = false;
+  bool _cancel = false;
+  bool _ready = false;
+
+  final _controller = TextEditingController();
+  final _scroll = ScrollController();
+  final _focus = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    _list = List<ProviderConfig>.from(widget.providers);
-  }
-
-  /// كل تغيير يُحفظ فوراً في التخزين (لا حاجة لزر حفظ رئيسي)
-  Future<void> _commit() async {
-    if (mounted) setState(() {});
-    await widget.onChanged(List<ProviderConfig>.from(_list));
-  }
-
-  Future<void> _add() async {
-    final r = await Navigator.push<ProviderConfig>(
-      context,
-      MaterialPageRoute(builder: (_) => const ProviderEditPage()),
-    );
-    if (r == null) return;
-    _list.add(r);
-    await _commit();
-  }
-
-  Future<void> _edit(ProviderConfig p) async {
-    final r = await Navigator.push<ProviderConfig>(
-      context,
-      MaterialPageRoute(builder: (_) => ProviderEditPage(initial: p)),
-    );
-    if (r == null) return;
-    final i = _list.indexWhere((e) => e.id == p.id);
-    if (i >= 0) _list[i] = r;
-    await _commit();
-  }
-
-  Future<void> _delete(ProviderConfig p) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('حذف المزود'),
-        content: Text('حذف «${p.name}» ومفتاحه من الجهاز؟'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    _list.removeWhere((e) => e.id == p.id);
-    await _commit();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.pal;
-    return Scaffold(
-      appBar: AppBar(title: const Text('المزودون')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _add,
-        backgroundColor: p.accent,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('إضافة مزود'),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-            child: Text(
-              'الترتيب هو أولوية التبديل التلقائي: عند فشل مزود ينتقل التطبيق إلى التالي. '
-              'اسحب ≡ لإعادة الترتيب. كل تغيير يُحفظ فوراً.',
-              style: TextStyle(color: p.text2, fontSize: 13, height: 1.45),
-            ),
-          ),
-          Expanded(
-            child: _list.isEmpty
-                ? Center(child: Text('لا يوجد مزودون بعد', style: TextStyle(color: p.text2)))
-                : ReorderableListView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 90),
-                    buildDefaultDragHandles: false,
-                    itemCount: _list.length,
-                    onReorder: (o, n) async {
-                      if (n > o) n -= 1;
-                      final it = _list.removeAt(o);
-                      _list.insert(n, it);
-                      await _commit();
-                    },
-                    itemBuilder: (context, i) {
-                      final pr = _list[i];
-                      final status = providerStatus(pr);
-                      final ready = status == 'جاهز';
-                      return Card(
-                        key: ValueKey(pr.id),
-                        elevation: 0,
-                        color: p.surface,
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          side: BorderSide(color: p.border),
-                        ),
-                        child: ListTile(
-                          onTap: () => _edit(pr),
-                          leading: ReorderableDragStartListener(
-                            index: i,
-                            child: Icon(Icons.drag_handle, color: p.text2),
-                          ),
-                          title: Text(pr.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text(
-                            '${pr.model.isEmpty ? '—' : pr.model} · $status'
-                            '${pr.imageModel.isNotEmpty ? ' · صور' : ''}'
-                            '${pr.videoModel.isNotEmpty ? ' · فيديو' : ''}',
-                            style: TextStyle(color: ready ? p.text2 : p.danger, fontSize: 12.5),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Switch(
-                                value: pr.enabled,
-                                onChanged: (v) {
-                                  pr.enabled = v;
-                                  _commit();
-                                },
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 20),
-                                onPressed: () => _delete(pr),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class ProviderEditPage extends StatefulWidget {
-  final ProviderConfig? initial;
-  const ProviderEditPage({super.key, this.initial});
-
-  @override
-  State<ProviderEditPage> createState() => _ProviderEditPageState();
-}
-
-class _ProviderEditPageState extends State<ProviderEditPage> {
-  // كل الحقول فارغة عند الإضافة الجديدة
-  final _name = TextEditingController();
-  final _endpoint = TextEditingController();
-  final _key = TextEditingController();
-  final _model = TextEditingController();
-  final _vision = TextEditingController();
-  final _image = TextEditingController();
-  final _video = TextEditingController();
-  String _format = 'auto';
-  bool _needsKey = true;
-  bool _testing = false;
-  String? _testResult;
-
-  @override
-  void initState() {
-    super.initState();
-    final i = widget.initial;
-    if (i != null) {
-      _name.text = i.name;
-      _endpoint.text = i.endpoint;
-      _key.text = i.apiKey;
-      _model.text = i.model;
-      _vision.text = i.visionModel;
-      _image.text = i.imageModel;
-      _video.text = i.videoModel;
-      _format = i.format;
-      _needsKey = i.needsKey;
-    }
+    _controller.addListener(() => setState(() {}));
+    _load();
   }
 
   @override
   void dispose() {
-    for (final c in [_name, _endpoint, _key, _model, _vision, _image, _video]) {
-      c.dispose();
-    }
+    _controller.dispose();
+    _scroll.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
-  void _applyPreset(ProviderPreset p) {
-    setState(() {
-      _name.text = p.name;
-      _endpoint.text = p.endpoint;
-      _model.text = p.model;
-      _vision.text = p.visionModel;
-      _image.text = p.imageModel;
-      _video.text = p.videoModel;
-      _format = p.format;
-      _needsKey = p.needsKey;
-      _key.clear(); // المفتاح يبقى فارغاً دائماً
-      _testResult = null;
-    });
-  }
-
-  /// لصق JSON كامل في خانة العنوان يملأ الحقول تلقائياً
-  void _onEndpointChanged(String v) {
-    final j = Sanitize.parseProviderJson(v);
-    if (j != null) {
-      setState(() {
-        if (j['endpoint']!.isNotEmpty) _endpoint.text = j['endpoint']!;
-        if (j['apiKey']!.isNotEmpty) _key.text = j['apiKey']!;
-        if (j['model']!.isNotEmpty) _model.text = j['model']!;
-        if (j['name']!.isNotEmpty && _name.text.isEmpty) _name.text = j['name']!;
-      });
-      return;
-    }
-    setState(() {});
-  }
-
-  ProviderConfig _build() {
-    final i = widget.initial;
-    return ProviderConfig(
-      id: i?.id,
-      name: Sanitize.text(_name.text),
-      endpoint: Sanitize.url(_endpoint.text),
-      apiKey: Sanitize.key(_key.text),
-      model: Sanitize.model(_model.text),
-      visionModel: Sanitize.model(_vision.text),
-      imageModel: Sanitize.model(_image.text),
-      videoModel: Sanitize.model(_video.text),
-      format: _format,
-      enabled: i?.enabled ?? true,
-      needsKey: _needsKey,
-    );
-  }
-
-  void _snack(String m) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
-
-  void _save() {
-    final cfg = _build();
-    final ep = ApiEndpoints.parse(cfg.endpoint, format: cfg.format);
-    if (ep.error != null) {
-      _snack(ep.error!);
-      return;
-    }
-    if (cfg.model.isEmpty && cfg.imageModel.isEmpty && cfg.videoModel.isEmpty && !ep.isPollinations) {
-      _snack('اكتب اسم النموذج (Model)');
-      return;
-    }
-    if (cfg.name.isEmpty) cfg.name = ep.host;
-    Navigator.pop(context, cfg);
-  }
-
-  Future<void> _test() async {
-    final cfg = _build();
-    final ep = ApiEndpoints.parse(cfg.endpoint, format: cfg.format);
-    if (ep.error != null) {
-      setState(() => _testResult = '❌ ${ep.error}');
-      return;
-    }
-    if (cfg.needsKey && cfg.apiKey.isEmpty) {
-      setState(() => _testResult = '❌ أدخل مفتاح API');
-      return;
-    }
-    setState(() {
-      _testing = true;
-      _testResult = null;
-    });
-    final err = await AIService(cfg).test();
+  Future<void> _load() async {
+    final s = await LocalStorage.loadSettings();
+    final p = await LocalStorage.loadProviders();
+    final sk = await LocalStorage.loadCustomSkills();
+    final c = await LocalStorage.loadConnectors();
+    final h = await LocalStorage.loadHistory();
     if (!mounted) return;
     setState(() {
-      _testing = false;
-      _testResult = err == null ? '✅ الاتصال ناجح' : '❌ $err';
+      _settings = s;
+      _providers = p;
+      _customSkills = sk;
+      _connectors = c;
+      _history = h;
+      _ready = true;
+    });
+    widget.onThemeChanged?.call(s.themeMode);
+  }
+
+  // ───────────── أدوات ─────────────
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 2)));
+  }
+
+  String _title(String t) {
+    final c = t.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (c.isEmpty) return 'محادثة جديدة';
+    return c.length <= 40 ? c : '${c.substring(0, 40)}…';
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients) return;
+      _scroll.jumpTo(_scroll.position.maxScrollExtent);
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Future<void> _saveChat() async {
+    _chat.updatedAt = DateTime.now();
+    final i = _history.indexWhere((c) => c.id == _chat.id);
+    if (i >= 0) {
+      _history[i] = _chat;
+    } else {
+      _history.insert(0, _chat);
+    }
+    _history.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    await LocalStorage.saveHistory(_history);
+  }
+
+  List<Skill> get _allSkills => [...kBuiltInSkills, ..._customSkills];
+
+  // ───────────── الملفات ─────────────
+
+  Future<void> _pickFiles(FileType type) async {
+    try {
+      final files = await FilePicker.pickFiles(type: type);
+      if (files.isEmpty) return;
+      setState(() {
+        for (final f in files) {
+          final path = f.path ?? '';
+          var size = 0;
+          try {
+            if (path.isNotEmpty) size = File(path).lengthSync();
+          } catch (_) {}
+          _attached.add(AttachedFile(name: f.name, path: path, size: size));
+        }
+      });
+    } catch (e) {
+      _snack('تعذر اختيار الملفات: $e');
+    }
+  }
+
+  Future<void> _paste() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final t = data?.text;
+    if (t == null || t.isEmpty) return;
+    final cur = _controller.text;
+    final sel = _controller.selection;
+    final start = sel.start >= 0 ? sel.start : cur.length;
+    final end = sel.end >= 0 ? sel.end : cur.length;
+    _controller.text = cur.replaceRange(start, end, t);
+    _controller.selection = TextSelection.collapsed(offset: start + t.length);
+  }
+
+  void _showAttachMenu() {
     final p = context.pal;
-    final adding = widget.initial == null;
-    final ep = ApiEndpoints.parse(_endpoint.text, format: _format);
-    final preview = _endpoint.text.trim().isEmpty
-        ? null
-        : (ep.error ?? 'سيُستخدم: ${ep.chatUrl}');
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(adding ? 'إضافة مزود' : 'تعديل المزود'),
-        actions: [
-          TextButton(onPressed: _save, child: const Text('حفظ')),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-        children: [
-          if (adding) ...[
-            Text('قوالب جاهزة (اختياري)', style: TextStyle(color: p.text2, fontSize: 13)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                for (final t in kProviderPresets)
-                  ActionChip(
-                    label: Text(t.name),
-                    backgroundColor: p.surface,
-                    side: BorderSide(color: p.border),
-                    onPressed: () => _applyPreset(t),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-          ],
-          TextField(
-            controller: _name,
-            decoration: const InputDecoration(
-              labelText: 'اسم المزود',
-              prefixIcon: Icon(Icons.badge_outlined),
-            ),
-          ),
-          const SizedBox(height: 12),
-          LtrField(
-            controller: _endpoint,
-            label: 'العنوان (API URL)',
-            hint: 'api.example.com/v1',
-            icon: Icons.link,
-            keyboardType: TextInputType.url,
-            onChanged: _onEndpointChanged,
-            helper: preview ??
-                'يقبل بدون https، أو مع /chat/completions، أو رابط ينتهي بـ .json، أو JSON كامل.',
-          ),
-          const SizedBox(height: 12),
-          LtrField(
-            controller: _key,
-            label: 'مفتاح API',
-            icon: Icons.key_outlined,
-            secret: true,
-          ),
-          const SizedBox(height: 4),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('يحتاج مفتاح API'),
-            value: _needsKey,
-            onChanged: (v) => setState(() => _needsKey = v),
-          ),
-          LtrField(
-            controller: _model,
-            label: 'النموذج (Model)',
-            icon: Icons.smart_toy_outlined,
-          ),
-          const SizedBox(height: 8),
-          Theme(
-            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-            child: ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              title: const Text('متقدم: الرؤية والصور والفيديو'),
-              children: [
-                const SizedBox(height: 8),
-                LtrField(
-                  controller: _vision,
-                  label: 'نموذج الرؤية (لتحليل الصور) — اختياري',
-                  icon: Icons.visibility_outlined,
-                ),
-                const SizedBox(height: 12),
-                LtrField(
-                  controller: _image,
-                  label: 'نموذج توليد الصور — اختياري',
-                  icon: Icons.image_outlined,
-                ),
-                const SizedBox(height: 12),
-                LtrField(
-                  controller: _video,
-                  label: 'نموذج توليد الفيديو — اختياري',
-                  icon: Icons.movie_outlined,
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text('صيغة الواجهة', style: TextStyle(color: p.text2, fontSize: 13)),
-                ),
-                const SizedBox(height: 6),
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'auto', label: Text('تلقائي')),
-                    ButtonSegment(value: 'openai', label: Text('OpenAI')),
-                    ButtonSegment(value: 'anthropic', label: Text('Anthropic')),
-                  ],
-                  selected: {_format},
-                  onSelectionChanged: (s) => setState(() => _format = s.first),
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _testing ? null : _test,
-            icon: _testing
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.wifi_tethering),
-            label: Text(_testing ? 'جارٍ الاختبار…' : 'اختبار الاتصال'),
-          ),
-          if (_testResult != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: SelectableText(
-                _testResult!,
-                style: TextStyle(
-                  color: _testResult!.startsWith('✅') ? Colors.green.shade700 : p.danger,
-                  height: 1.4,
-                ),
-              ),
-            ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _save,
-            icon: const Icon(Icons.check),
-            label: Text(adding ? 'إضافة وحفظ' : 'حفظ التعديلات'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════ Skills ═════════════════════════════
-
-class SkillsSheet extends StatefulWidget {
-  final ScrollController controller;
-  final List<Skill> customSkills;
-  final String? activeId;
-  final Future<void> Function(List<Skill>) onCustomChanged;
-
-  const SkillsSheet({
-    super.key,
-    required this.controller,
-    required this.customSkills,
-    required this.activeId,
-    required this.onCustomChanged,
-  });
-
-  @override
-  State<SkillsSheet> createState() => _SkillsSheetState();
-}
-
-class _SkillsSheetState extends State<SkillsSheet> {
-  late List<Skill> _custom;
-
-  @override
-  void initState() {
-    super.initState();
-    _custom = List<Skill>.from(widget.customSkills);
-  }
-
-  Future<void> _addSkill() async {
-    final title = TextEditingController();
-    final instr = TextEditingController();
-    final ok = await showDialog<bool>(
+    showModalBottomSheet<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('مهارة جديدة'),
-        content: SingleChildScrollView(
+      builder: (ctx) {
+        Widget item(IconData icon, String label, VoidCallback onTap) => ListTile(
+              leading: Icon(icon, color: p.text),
+              title: Text(label),
+              onTap: () {
+                Navigator.pop(ctx);
+                onTap();
+              },
+            );
+        return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(controller: title, decoration: const InputDecoration(labelText: 'اسم المهارة')),
-              const SizedBox(height: 12),
-              TextField(
-                controller: instr,
-                minLines: 3,
-                maxLines: 6,
-                decoration: const InputDecoration(
-                  labelText: 'التعليمات',
-                  hintText: 'مثال: أجب كخبير قانوني جزائري واذكر المواد…',
-                ),
-              ),
+              const SizedBox(height: 8),
+              item(Icons.insert_drive_file_outlined, 'ملف (أي صيغة)', () => _pickFiles(FileType.any)),
+              item(Icons.image_outlined, 'صورة', () => _pickFiles(FileType.image)),
+              item(Icons.videocam_outlined, 'فيديو', () => _pickFiles(FileType.video)),
+              item(Icons.content_paste, 'لصق من الحافظة', _paste),
+              const SizedBox(height: 8),
             ],
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حفظ')),
-        ],
-      ),
-    );
-    final t = Sanitize.text(title.text);
-    final i = instr.text.trim();
-    title.dispose();
-    instr.dispose();
-    if (ok != true || t.isEmpty || i.isEmpty) return;
-    _custom.add(Skill(title: t, instruction: i));
-    await widget.onCustomChanged(List<Skill>.from(_custom));
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _delete(Skill s) async {
-    _custom.removeWhere((e) => e.id == s.id);
-    await widget.onCustomChanged(List<Skill>.from(_custom));
-    if (mounted) setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.pal;
-    final all = [...kBuiltInSkills, ..._custom];
-    final cats = <String>[];
-    for (final s in all) {
-      if (!cats.contains(s.category)) cats.add(s.category);
-    }
-    return SheetScaffold(
-      controller: widget.controller,
-      title: 'Skills',
-      subtitle: 'المهارة المختارة تُطبَّق على رسائلك حتى تلغيها. بدونها يتعرف التطبيق على نوع السؤال تلقائياً.',
-      children: [
-        Wrap(
-          spacing: 8,
-          children: [
-            ActionChip(
-              avatar: const Icon(Icons.auto_awesome, size: 18),
-              label: const Text('تلقائي (بدون مهارة)'),
-              backgroundColor: widget.activeId == null ? p.userBubble : p.surface,
-              side: BorderSide(color: p.border),
-              onPressed: () => Navigator.pop(context, 'none'),
-            ),
-            ActionChip(
-              avatar: const Icon(Icons.add, size: 18),
-              label: const Text('مهارة جديدة'),
-              backgroundColor: p.surface,
-              side: BorderSide(color: p.border),
-              onPressed: _addSkill,
-            ),
-          ],
-        ),
-        for (final cat in cats) ...[
-          Padding(
-            padding: const EdgeInsets.only(top: 16, bottom: 8),
-            child: Text(cat, style: TextStyle(fontWeight: FontWeight.w700, color: p.accent)),
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final s in all.where((e) => e.category == cat))
-                GestureDetector(
-                  onLongPress: s.builtIn ? null : () => _delete(s),
-                  child: ActionChip(
-                    label: Text(s.title),
-                    backgroundColor: widget.activeId == s.id ? p.userBubble : p.surface,
-                    side: BorderSide(
-                      color: widget.activeId == s.id ? p.accent : p.border,
-                    ),
-                    onPressed: () => Navigator.pop(context, s),
-                  ),
-                ),
-            ],
-          ),
-        ],
-        if (_custom.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 14),
-            child: Text('اضغط مطولاً على مهارتك المخصصة لحذفها.',
-                style: TextStyle(color: p.text2, fontSize: 12.5)),
-          ),
-      ],
+        );
+      },
     );
   }
-}
 
-// ═════════════════════════════ Connectors ═════════════════════════════
+  // ───────────── Skills / Connectors / المزودون ─────────────
 
-class ConnectorsSheet extends StatefulWidget {
-  final ScrollController controller;
-  final List<ConnectorConfig> connectors;
-  final Future<void> Function(List<ConnectorConfig>) onChanged;
-
-  const ConnectorsSheet({
-    super.key,
-    required this.controller,
-    required this.connectors,
-    required this.onChanged,
-  });
-
-  @override
-  State<ConnectorsSheet> createState() => _ConnectorsSheetState();
-}
-
-class _ConnectorsSheetState extends State<ConnectorsSheet> {
-  late List<ConnectorConfig> _list;
-
-  @override
-  void initState() {
-    super.initState();
-    _list = List<ConnectorConfig>.from(widget.connectors);
-  }
-
-  Future<void> _commit() async {
-    if (mounted) setState(() {});
-    await widget.onChanged(List<ConnectorConfig>.from(_list));
-  }
-
-  Future<void> _add() async {
-    final type = await showDialog<ConnectorType>(
+  Future<void> _openSkills() async {
+    final picked = await showModalBottomSheet<Object?>(
       context: context,
-      builder: (ctx) => SimpleDialog(
-        title: const Text('اختر نوع الموصل'),
-        children: [
-          for (final t in kConnectorTypes)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, t),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(t.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    Text(t.description,
-                        style: TextStyle(fontSize: 12.5, color: context.pal.text2)),
-                  ],
-                ),
-              ),
-            ),
-        ],
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (c, sc) => SkillsSheet(
+          controller: sc,
+          customSkills: _customSkills,
+          activeId: _activeSkill?.id,
+          onCustomChanged: (list) async {
+            _customSkills = list;
+            await LocalStorage.saveCustomSkills(list);
+            if (_activeSkill != null && !_allSkills.any((s) => s.id == _activeSkill!.id)) {
+              _activeSkill = null;
+            }
+            if (mounted) setState(() {});
+          },
+        ),
       ),
     );
-    if (type == null || !mounted) return;
-    final r = await Navigator.push<ConnectorConfig>(
+    if (!mounted) return;
+    if (picked is Skill) {
+      setState(() => _activeSkill = picked);
+      _focus.requestFocus();
+    } else if (picked == 'none') {
+      setState(() => _activeSkill = null);
+    }
+  }
+
+  Future<void> _openConnectors() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (c, sc) => ConnectorsSheet(
+          controller: sc,
+          connectors: _connectors,
+          onChanged: (list) async {
+            _connectors = list;
+            await LocalStorage.saveConnectors(list);
+            if (mounted) setState(() {});
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openProviders() async {
+    await Navigator.push<void>(
       context,
       MaterialPageRoute(
-        builder: (_) => ConnectorEditPage(initial: ConnectorConfig(type: type.id, name: type.title)),
+        builder: (_) => ProvidersPage(
+          providers: _providers,
+          onChanged: (list) async {
+            _providers = list;
+            await LocalStorage.saveProviders(list);
+            if (_settings.activeProviderId != 'auto' &&
+                !list.any((p) => p.id == _settings.activeProviderId)) {
+              _settings.activeProviderId = 'auto';
+              await LocalStorage.saveSettings(_settings);
+            }
+            if (mounted) setState(() {});
+          },
+        ),
       ),
     );
-    if (r == null) return;
-    _list.add(r);
-    await _commit();
   }
 
-  Future<void> _edit(ConnectorConfig c) async {
-    final r = await Navigator.push<ConnectorConfig>(
+  Future<void> _openSettings() async {
+    await Navigator.push<void>(
       context,
-      MaterialPageRoute(builder: (_) => ConnectorEditPage(initial: c)),
+      MaterialPageRoute(
+        builder: (_) => SettingsPage(
+          settings: _settings,
+          onChanged: (s) async {
+            _settings = s;
+            await LocalStorage.saveSettings(s);
+            widget.onThemeChanged?.call(s.themeMode);
+            if (mounted) setState(() {});
+          },
+          onClearHistory: () async {
+            _history.clear();
+            _chat = ChatHistory(title: 'محادثة جديدة');
+            await LocalStorage.saveHistory(_history);
+            if (mounted) setState(() {});
+          },
+          onOpenProviders: _openProviders,
+        ),
+      ),
     );
-    if (r == null) return;
-    final i = _list.indexWhere((e) => e.id == c.id);
-    if (i >= 0) _list[i] = r;
-    await _commit();
   }
 
-  @override
-  Widget build(BuildContext context) {
+  void _showProviderPicker() {
     final p = context.pal;
-    return SheetScaffold(
-      controller: widget.controller,
-      title: 'الموصلات (Connectors)',
-      subtitle: 'اربط التطبيق بخدماتك: اقرأ روابط GitHub، وأرسل الإجابات إلى Telegram أو أي Webhook (Zapier / Make / n8n / Slack / Discord).',
-      children: [
-        for (final c in _list)
-          Card(
-            elevation: 0,
-            color: p.bg,
-            margin: const EdgeInsets.symmetric(vertical: 4),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: BorderSide(color: p.border),
-            ),
-            child: ListTile(
-              onTap: () => _edit(c),
-              leading: Icon(_iconFor(c.type), color: p.accent),
-              title: Text(c.name),
-              subtitle: Text(connectorTypeOf(c.type).title,
-                  style: TextStyle(color: p.text2, fontSize: 12.5)),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        Future<void> choose(String id) async {
+          _settings.activeProviderId = id;
+          await LocalStorage.saveSettings(_settings);
+          if (mounted) setState(() {});
+          if (ctx.mounted) Navigator.pop(ctx);
+        }
+
+        final usable = _providers.where((e) => e.usable).toList();
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
+            children: [
+              ListTile(
+                leading: Icon(Icons.autorenew, color: p.accent),
+                title: const Text('تلقائي'),
+                subtitle: const Text('يجرب المزودين بالترتيب وينتقل عند الفشل'),
+                trailing: _settings.activeProviderId == 'auto'
+                    ? Icon(Icons.check, color: p.accent)
+                    : null,
+                onTap: () => choose('auto'),
+              ),
+              const Divider(height: 1),
+              if (usable.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('لا يوجد مزود جاهز. أضف مفتاح API من «إدارة المزودين».'),
+                ),
+              for (final pr in usable)
+                ListTile(
+                  leading: const Icon(Icons.dns_outlined),
+                  title: Text(pr.name),
+                  subtitle: Text(pr.model.isEmpty ? '—' : pr.model,
+                      textDirection: TextDirection.ltr, textAlign: TextAlign.start),
+                  trailing: _settings.activeProviderId == pr.id
+                      ? Icon(Icons.check, color: p.accent)
+                      : null,
+                  onTap: () => choose(pr.id),
+                ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.tune),
+                title: const Text('إدارة المزودين'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openProviders();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String get _providerLabel {
+    if (_settings.activeProviderId == 'auto') return 'تلقائي';
+    for (final p in _providers) {
+      if (p.id == _settings.activeProviderId) return p.name;
+    }
+    return 'تلقائي';
+  }
+
+  // ───────────── المحادثات ─────────────
+
+  void _newChat() {
+    if (_busy) return;
+    setState(() {
+      _chat = ChatHistory(title: 'محادثة جديدة');
+      _attached.clear();
+      _controller.clear();
+      _activeSkill = null;
+    });
+  }
+
+  void _selectChat(ChatHistory c) {
+    if (_busy) return;
+    setState(() {
+      _chat = c;
+      _attached.clear();
+      _controller.clear();
+    });
+    _scrollToBottom();
+  }
+
+  Future<void> _deleteChat(ChatHistory c) async {
+    setState(() {
+      _history.removeWhere((e) => e.id == c.id);
+      if (_chat.id == c.id) _chat = ChatHistory(title: 'محادثة جديدة');
+    });
+    await LocalStorage.saveHistory(_history);
+  }
+
+  // ───────────── الإرسال ─────────────
+
+  Future<void> _send() async {
+    final text = _controller.text.trim();
+    if (_busy || (text.isEmpty && _attached.isEmpty)) return;
+    final files = List<AttachedFile>.from(_attached);
+    final user = ChatMessage(role: 'user', content: text, files: files);
+    final asst = ChatMessage(role: 'assistant');
+    setState(() {
+      if (_chat.messages.isEmpty) {
+        _chat.title = _title(text.isEmpty ? files.first.name : text);
+      }
+      _chat.messages.add(user);
+      _chat.messages.add(asst);
+      _attached.clear();
+      _controller.clear();
+    });
+    _scrollToBottom();
+    await _respond(user, asst);
+  }
+
+  Future<void> _regenerate(ChatMessage asst) async {
+    if (_busy) return;
+    final i = _chat.messages.indexOf(asst);
+    if (i <= 0) return;
+    final user = _chat.messages[i - 1];
+    if (user.role != 'user') return;
+    setState(() {
+      asst.content = '';
+      asst.media.clear();
+      asst.isError = false;
+    });
+    await _respond(user, asst);
+  }
+
+  void _stop() {
+    _cancel = true;
+  }
+
+  List<LlmMessage> _buildMessages(
+      ChatMessage current, IntentResult intent, List<ImagePart> images, String effective) {
+    final sys = StringBuffer(_settings.systemPrompt.trim());
+    if (_settings.userName.trim().isNotEmpty) {
+      sys.write('\nاسم المستخدم: ${_settings.userName.trim()}.');
+    }
+    sys.write('\nالتاريخ اليوم: ${DateTime.now().toIso8601String().substring(0, 10)}.');
+    if (intent.addon.isNotEmpty) sys.write('\n\n${intent.addon}');
+
+    String textOf(ChatMessage m) {
+      final base = m.content;
+      return m.context.isEmpty ? base : '$base\n\n${m.context}';
+    }
+
+    final idx = _chat.messages.indexOf(current);
+    final hist = _chat.messages
+        .sublist(0, idx < 0 ? 0 : idx)
+        .where((m) => !m.isError && textOf(m).trim().isNotEmpty)
+        .toList();
+    var budget = 60000;
+    final picked = <LlmMessage>[];
+    for (var i = hist.length - 1; i >= 0 && budget > 0; i--) {
+      final t = textOf(hist[i]);
+      budget -= t.length;
+      picked.insert(0, LlmMessage(hist[i].role, t));
+    }
+    return [
+      LlmMessage('system', sys.toString()),
+      ...picked,
+      LlmMessage('user', effective, images: images),
+    ];
+  }
+
+  Future<void> _respond(ChatMessage user, ChatMessage asst) async {
+    setState(() {
+      _busy = true;
+      _cancel = false;
+      asst.status = 'جارٍ التحضير…';
+      asst.isError = false;
+    });
+    bool cancelled() => _cancel;
+
+    try {
+      // 1) قراءة الملفات
+      final processed = <ProcessedFile>[];
+      for (final f in user.files) {
+        if (mounted) setState(() => asst.status = 'قراءة ${f.name}…');
+        processed.add(await FileProcessor.process(f, maxChars: _settings.maxFileChars));
+      }
+      final images = <ImagePart>[
+        for (final pf in processed) ...pf.images,
+      ];
+      if (images.length > 10) images.removeRange(10, images.length);
+      final hasVideo = processed.any((p) => p.kind == FileKind.video);
+      final hasImages = processed.any((p) => p.kind == FileKind.image) ||
+          (images.isNotEmpty && !hasVideo);
+      final exts = user.files.map((f) => FileProcessor.extOf(f.name)).toList();
+
+      // 2) التعرف على نوع السؤال
+      IntentResult intent;
+      if (_settings.autoIntent || _activeSkill != null) {
+        final detected = IntentDetector.detect(user.content,
+            hasImages: hasImages, hasVideo: hasVideo, fileExts: exts);
+        if (detected.isGeneration) {
+          intent = detected;
+        } else if (_activeSkill != null) {
+          intent = IntentResult(Intent.chat,
+              needsVision: images.isNotEmpty,
+              label: _activeSkill!.title,
+              addon: _activeSkill!.instruction);
+        } else {
+          intent = detected;
+        }
+      } else {
+        intent = IntentResult(Intent.chat, needsVision: images.isNotEmpty);
+      }
+      if (mounted) setState(() => asst.intentLabel = intent.label);
+
+      // 3) السياق: ملفات + روابط
+      var ctx = FileProcessor.buildContext(processed,
+          maxChars: _settings.maxFileChars,
+          normalizeNumbers: intent.intent == Intent.finance);
+      final urls = UrlContext.extract(user.content);
+      if (urls.isNotEmpty) {
+        if (mounted) setState(() => asst.status = 'قراءة الروابط…');
+        final u = await UrlContext.build(urls, _connectors);
+        ctx = ctx.isEmpty ? u : '$ctx\n\n$u';
+      }
+      user.context = ctx;
+
+      if (intent.intent == Intent.imageGen) {
+        await _generateImage(user, asst, cancelled);
+        return;
+      }
+      if (intent.intent == Intent.videoGen) {
+        await _generateVideo(user, asst, cancelled);
+        return;
+      }
+
+      // 4) المحادثة
+      final base = user.content.isEmpty
+          ? 'حلل المرفقات وأخبرني بأهم ما فيها.'
+          : user.content;
+      final effective = ctx.isEmpty ? base : '$base\n\n$ctx';
+      final msgs = _buildMessages(user, intent, images, effective);
+
+      if (mounted) setState(() => asst.status = 'جارٍ الاتصال…');
+      final res = await ChatRouter.run(
+        providers: _providers,
+        messages: msgs,
+        activeId: _settings.activeProviderId,
+        autoSwitch: _settings.autoSwitch,
+        vision: images.isNotEmpty,
+        stream: _settings.streamEnabled,
+        isCancelled: cancelled,
+        onProvider: (name) {
+          if (!mounted) return;
+          setState(() {
+            asst.provider = name;
+            asst.status = 'الاتصال بـ $name…';
+            asst.content = '';
+          });
+        },
+        onChunk: (c) {
+          if (!mounted) return;
+          setState(() {
+            asst.status = '';
+            asst.content += c;
+          });
+          _scrollToBottom();
+        },
+      );
+      if (mounted) {
+        setState(() {
+          if (asst.content.trim().isEmpty) asst.content = res.text;
+          asst.provider = res.provider;
+        });
+      }
+    } on LlmException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (e.kind == 'cancel') {
+          if (asst.content.isEmpty) asst.content = '(تم الإيقاف)';
+        } else {
+          asst.isError = true;
+          asst.content = _errorText(e);
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        asst.isError = true;
+        asst.content = '⚠️ حدث خطأ غير متوقع:\n\n$e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          asst.status = '';
+          if (_cancel && asst.content.trim().isEmpty && asst.media.isEmpty) {
+            asst.content = '(تم الإيقاف)';
+          }
+        });
+      }
+      await _saveChat();
+      _scrollToBottom();
+    }
+  }
+
+  String _errorText(LlmException e) {
+    final b = StringBuffer('⚠️ تعذر الحصول على إجابة\n\n${e.message}\n\n');
+    if (e.kind == 'config') {
+      b.write('افتح «إدارة المزودين» وتأكد من العنوان والمفتاح واسم النموذج.');
+    } else {
+      b.write('جرّب: زر «إدارة المزودين» ← اختبار الاتصال، أو أضف مزوداً آخر ليتم الانتقال إليه تلقائياً.');
+    }
+    return b.toString();
+  }
+
+  // ───────────── توليد الوسائط ─────────────
+
+  Future<String> _englishPrompt(String text, String kind) async {
+    try {
+      final r = await ChatRouter.quick(
+        providers: _providers,
+        system: 'Convert the user request into ONE detailed English prompt for a $kind generation model '
+            '(subject, style, lighting, composition, colors, mood). Output ONLY the prompt, no quotes or explanations.',
+        user: text,
+        activeId: _settings.activeProviderId,
+        autoSwitch: _settings.autoSwitch,
+      );
+      return r.isEmpty ? text : r;
+    } catch (_) {
+      return text;
+    }
+  }
+
+  Future<void> _generateImage(ChatMessage user, ChatMessage asst, bool Function() cancelled) async {
+    final text = user.content;
+    if (mounted) setState(() => asst.status = 'تحسين وصف الصورة…');
+    final prompt = await _englishPrompt(text, 'image');
+    try {
+      final r = await MediaService.generateImage(
+        prompt: prompt,
+        providers: _providers,
+        isCancelled: cancelled,
+        onStatus: (s) {
+          if (mounted) setState(() => asst.status = s);
+        },
+      );
+      final item = await MediaService.save(r);
+      if (!mounted) return;
+      setState(() {
+        asst.media.add(item);
+        asst.provider = r.provider;
+        asst.content = 'تم توليد الصورة.\n\n> الوصف المستخدم: $prompt';
+      });
+    } on LlmException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (e.kind == 'cancel') {
+          asst.content = '(تم الإيقاف)';
+        } else {
+          asst.isError = true;
+          asst.content = '⚠️ تعذر توليد الصورة\n\n${e.message}\n\n'
+              'يمكنك إضافة مزود يدعم الصور (OpenAI / Together ...) وكتابة «نموذج الصور» في إعداداته.\n\n'
+              'الوصف المحسّن:\n```\n$prompt\n```';
+        }
+      });
+    }
+  }
+
+  Future<void> _generateVideo(ChatMessage user, ChatMessage asst, bool Function() cancelled) async {
+    final text = user.content;
+    if (mounted) setState(() => asst.status = 'تحسين وصف الفيديو…');
+    final prompt = await _englishPrompt(text, 'video');
+    try {
+      final r = await MediaService.generateVideo(
+        prompt: prompt,
+        providers: _providers,
+        isCancelled: cancelled,
+        onStatus: (s) {
+          if (mounted) setState(() => asst.status = s);
+        },
+      );
+      final item = await MediaService.save(r);
+      if (!mounted) return;
+      setState(() {
+        asst.media.add(item);
+        asst.provider = r.provider;
+        asst.content = 'تم توليد الفيديو.\n\n> الوصف المستخدم: $prompt';
+      });
+    } on LlmException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (e.kind == 'cancel') {
+          asst.content = '(تم الإيقاف)';
+        } else {
+          asst.isError = true;
+          asst.content = '⚠️ تعذر توليد الفيديو\n\n${e.message}\n\n'
+              'توليد الفيديو يحتاج مزوداً يدعمه (مثل OpenAI Sora) مع كتابة «نموذج الفيديو» في إعداداته.\n\n'
+              'يمكنك استخدام هذا الوصف في أي مولّد فيديو:\n```\n$prompt\n```';
+        }
+      });
+    }
+  }
+
+  // ───────────── الموصلات ─────────────
+
+  Future<void> _sendToConnector(String text) async {
+    final list = _connectors.where(ConnectorActions.canSend).toList();
+    if (list.isEmpty) {
+      _snack('أضف موصل Telegram أو Webhook أولاً من زر الموصلات');
+      return;
+    }
+    ConnectorConfig? target;
+    if (list.length == 1) {
+      target = list.first;
+    } else {
+      target = await showModalBottomSheet<ConnectorConfig>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('إرسال إلى…', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+              for (final c in list)
+                ListTile(
+                  leading: const Icon(Icons.send_outlined),
+                  title: Text(c.name),
+                  onTap: () => Navigator.pop(ctx, c),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (target == null) return;
+    try {
+      final msg = await ConnectorActions.send(target, text);
+      _snack(msg);
+    } catch (e) {
+      _snack('فشل الإرسال: ${e.toString().replaceFirst('Exception: ', '')}');
+    }
+  }
+
+  // ───────────── الواجهة ─────────────
+
+  Widget _drawer() {
+    final p = context.pal;
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+              child: Row(
                 children: [
-                  Switch(
-                    value: c.enabled,
-                    onChanged: (v) {
-                      c.enabled = v;
-                      _commit();
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 20),
-                    onPressed: () {
-                      _list.removeWhere((e) => e.id == c.id);
-                      _commit();
-                    },
-                  ),
+                  const SparkIcon(size: 26),
+                  const SizedBox(width: 10),
+                  const Text('WHAH AI',
+                      style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700, fontFamily: 'serif')),
                 ],
               ),
             ),
-          ),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: _add,
-          icon: const Icon(Icons.add),
-          label: const Text('إضافة موصل'),
-        ),
-      ],
-    );
-  }
-
-  IconData _iconFor(String type) {
-    switch (type) {
-      case 'github':
-        return Icons.code;
-      case 'telegram':
-        return Icons.send_outlined;
-      case 'webhook':
-        return Icons.webhook_outlined;
-      default:
-        return Icons.api_outlined;
-    }
-  }
-}
-
-class ConnectorEditPage extends StatefulWidget {
-  final ConnectorConfig initial;
-  const ConnectorEditPage({super.key, required this.initial});
-
-  @override
-  State<ConnectorEditPage> createState() => _ConnectorEditPageState();
-}
-
-class _ConnectorEditPageState extends State<ConnectorEditPage> {
-  late final TextEditingController _name;
-  late final TextEditingController _url;
-  late final TextEditingController _token;
-  late final TextEditingController _extra;
-  bool _testing = false;
-  String? _result;
-
-  @override
-  void initState() {
-    super.initState();
-    final c = widget.initial;
-    _name = TextEditingController(text: c.name);
-    _url = TextEditingController(text: c.url);
-    _token = TextEditingController(text: c.token);
-    _extra = TextEditingController(text: c.extra);
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _url.dispose();
-    _token.dispose();
-    _extra.dispose();
-    super.dispose();
-  }
-
-  ConnectorConfig _build() => ConnectorConfig(
-        id: widget.initial.id,
-        type: widget.initial.type,
-        name: Sanitize.text(_name.text).isEmpty
-            ? connectorTypeOf(widget.initial.type).title
-            : Sanitize.text(_name.text),
-        url: Sanitize.url(_url.text),
-        token: Sanitize.key(_token.text),
-        extra: Sanitize.text(_extra.text),
-        enabled: widget.initial.enabled,
-      );
-
-  Future<void> _test() async {
-    setState(() {
-      _testing = true;
-      _result = null;
-    });
-    final err = await ConnectorActions.test(_build());
-    if (!mounted) return;
-    setState(() {
-      _testing = false;
-      _result = err == null ? '✅ يعمل' : '❌ $err';
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.pal;
-    final t = connectorTypeOf(widget.initial.type);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(t.title, style: const TextStyle(fontSize: 16)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, _build()), child: const Text('حفظ')),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-        children: [
-          Text(t.description, style: TextStyle(color: p.text2, height: 1.45)),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _name,
-            decoration: const InputDecoration(labelText: 'الاسم', prefixIcon: Icon(Icons.badge_outlined)),
-          ),
-          if (t.urlLabel.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            LtrField(
-              controller: _url,
-              label: t.urlLabel,
-              icon: Icons.link,
-              keyboardType: TextInputType.url,
+            ListTile(
+              leading: const Icon(Icons.edit_square),
+              title: const Text('محادثة جديدة'),
+              onTap: () {
+                Navigator.pop(context);
+                _newChat();
+              },
             ),
-          ],
-          if (t.tokenLabel.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            LtrField(controller: _token, label: t.tokenLabel, icon: Icons.key_outlined, secret: true),
-          ],
-          if (t.extraLabel.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            LtrField(controller: _extra, label: t.extraLabel, icon: Icons.tag),
-          ],
-          const SizedBox(height: 16),
-          OutlinedButton.icon(
-            onPressed: _testing ? null : _test,
-            icon: _testing
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.wifi_tethering),
-            label: const Text('اختبار'),
-          ),
-          if (_result != null)
+            const Divider(height: 1),
             Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(_result!,
-                  style: TextStyle(color: _result!.startsWith('✅') ? Colors.green.shade700 : p.danger)),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═════════════════════════════ الإعدادات ═════════════════════════════
-
-class SettingsPage extends StatefulWidget {
-  final AppSettings settings;
-  final Future<void> Function(AppSettings) onChanged;
-  final Future<void> Function() onClearHistory;
-  final Future<void> Function() onOpenProviders;
-
-  const SettingsPage({
-    super.key,
-    required this.settings,
-    required this.onChanged,
-    required this.onClearHistory,
-    required this.onOpenProviders,
-  });
-
-  @override
-  State<SettingsPage> createState() => _SettingsPageState();
-}
-
-class _SettingsPageState extends State<SettingsPage> {
-  late AppSettings _s;
-  late final TextEditingController _name;
-  late final TextEditingController _prompt;
-
-  @override
-  void initState() {
-    super.initState();
-    _s = widget.settings;
-    _name = TextEditingController(text: _s.userName);
-    _prompt = TextEditingController(text: _s.systemPrompt);
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _prompt.dispose();
-    super.dispose();
-  }
-
-  void _apply() {
-    setState(() {});
-    widget.onChanged(_s);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.pal;
-    return Scaffold(
-      appBar: AppBar(title: const Text('الإعدادات')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-        children: [
-          TextField(
-            controller: _name,
-            decoration: const InputDecoration(
-              labelText: 'اسمك (يظهر في الترحيب)',
-              prefixIcon: Icon(Icons.person_outline),
-            ),
-            onChanged: (v) {
-              _s.userName = v.trim();
-              widget.onChanged(_s);
-            },
-          ),
-          const SizedBox(height: 18),
-          Text('المظهر', style: TextStyle(color: p.text2, fontSize: 13)),
-          const SizedBox(height: 6),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'system', label: Text('النظام')),
-              ButtonSegment(value: 'light', label: Text('فاتح')),
-              ButtonSegment(value: 'dark', label: Text('داكن')),
-            ],
-            selected: {_s.themeMode},
-            onSelectionChanged: (v) {
-              _s.themeMode = v.first;
-              _apply();
-            },
-          ),
-          const SizedBox(height: 8),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.dns_outlined),
-            title: const Text('المزودون والمفاتيح'),
-            trailing: const Icon(Icons.chevron_left),
-            onTap: () => widget.onOpenProviders(),
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('الانتقال التلقائي بين المزودين'),
-            subtitle: const Text('عند فشل مزود أو تجاوز حدّه ينتقل للتالي'),
-            value: _s.autoSwitch,
-            onChanged: (v) {
-              _s.autoSwitch = v;
-              _apply();
-            },
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('التعرف التلقائي على السؤال'),
-            subtitle: const Text('صورة، فيديو، مالية، تواصل اجتماعي، مشكلة، كود…'),
-            value: _s.autoIntent,
-            onChanged: (v) {
-              _s.autoIntent = v;
-              _apply();
-            },
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('عرض الإجابة أثناء كتابتها (Streaming)'),
-            value: _s.streamEnabled,
-            onChanged: (v) {
-              _s.streamEnabled = v;
-              _apply();
-            },
-          ),
-          const SizedBox(height: 8),
-          Text('أقصى نص يُقرأ من كل ملف: ${_s.maxFileChars} حرف',
-              style: TextStyle(color: p.text2, fontSize: 13)),
-          Slider(
-            min: 5000,
-            max: 100000,
-            divisions: 19,
-            value: _s.maxFileChars.clamp(5000, 100000).toDouble(),
-            onChanged: (v) {
-              _s.maxFileChars = v.round();
-              _apply();
-            },
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _prompt,
-            minLines: 3,
-            maxLines: 6,
-            decoration: InputDecoration(
-              labelText: 'موجّه النظام (System Prompt)',
-              suffixIcon: IconButton(
-                tooltip: 'استعادة الافتراضي',
-                icon: const Icon(Icons.restore),
-                onPressed: () {
-                  _prompt.text = AppSettings.defaultSystemPrompt;
-                  _s.systemPrompt = AppSettings.defaultSystemPrompt;
-                  _apply();
-                },
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text('المحادثات', style: TextStyle(color: p.text2, fontSize: 13)),
               ),
             ),
-            onChanged: (v) {
-              _s.systemPrompt = v.trim().isEmpty ? AppSettings.defaultSystemPrompt : v;
-              widget.onChanged(_s);
-            },
-          ),
-          const SizedBox(height: 20),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(foregroundColor: p.danger),
-            icon: const Icon(Icons.delete_sweep_outlined),
-            label: const Text('مسح كل المحادثات'),
-            onPressed: () async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('مسح المحادثات'),
-                  content: const Text('سيتم حذف كل المحادثات المحفوظة نهائياً.'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-                    TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('مسح')),
+            Expanded(
+              child: _history.isEmpty
+                  ? Center(child: Text('لا توجد محادثات', style: TextStyle(color: p.text2)))
+                  : ListView.builder(
+                      itemCount: _history.length,
+                      itemBuilder: (context, i) {
+                        final c = _history[i];
+                        final sel = c.id == _chat.id;
+                        return ListTile(
+                          selected: sel,
+                          selectedTileColor: p.userBubble,
+                          title: Text(c.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, size: 19),
+                            onPressed: () => _deleteChat(c),
+                          ),
+                          onTap: () {
+                            Navigator.pop(context);
+                            _selectChat(c);
+                          },
+                        );
+                      },
+                    ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.dns_outlined),
+              title: const Text('المزودون'),
+              onTap: () {
+                Navigator.pop(context);
+                _openProviders();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('الإعدادات'),
+              onTap: () {
+                Navigator.pop(context);
+                _openSettings();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _welcome() {
+    final p = context.pal;
+    final name = _settings.userName.trim();
+    final hasProvider = _providers.any((e) => e.usable);
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SparkIcon(size: 46),
+            const SizedBox(height: 22),
+            Text(
+              name.isEmpty ? 'كيف أساعدك اليوم؟' : 'مرحباً، $name',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'serif',
+                fontSize: 31,
+                fontWeight: FontWeight.w500,
+                color: p.text,
+              ),
+            ),
+            if (!hasProvider) ...[
+              const SizedBox(height: 22),
+              FilledButton.icon(
+                onPressed: _openProviders,
+                icon: const Icon(Icons.key),
+                label: const Text('أضف مزود ذكاء اصطناعي'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _userBubble(ChatMessage m) {
+    final p = context.pal;
+    final images = m.files.where((f) => FileProcessor.kindOf(f.name) == FileKind.image).toList();
+    final others = m.files.where((f) => FileProcessor.kindOf(f.name) != FileKind.image).toList();
+    return Align(
+      alignment: AlignmentDirectional.centerEnd,
+      child: Container(
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.86),
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        decoration: BoxDecoration(
+          color: p.userBubble,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (images.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final f in images)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: LocalImage(path: f.path, width: 110, height: 110),
+                      ),
                   ],
                 ),
-              );
-              if (ok == true) await widget.onClearHistory();
-            },
+              ),
+            for (final f in others)
+              Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: p.bg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: p.border),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      FileProcessor.kindOf(f.name) == FileKind.video
+                          ? Icons.videocam_outlined
+                          : Icons.description_outlined,
+                      size: 18,
+                      color: p.text2,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text('${f.name} · ${f.sizeLabel}',
+                          overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+                    ),
+                  ],
+                ),
+              ),
+            if (m.content.isNotEmpty)
+              SelectableText(m.content, style: TextStyle(fontSize: 16, height: 1.5, color: p.text)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _assistantBlock(ChatMessage m, {required bool isLast}) {
+    final p = context.pal;
+    final working = _busy && isLast;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const SparkIcon(size: 18),
+              const SizedBox(width: 8),
+              if (m.provider.isNotEmpty)
+                Text(m.provider, style: TextStyle(fontSize: 12, color: p.text2)),
+              if (m.intentLabel.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: p.userBubble,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(m.intentLabel, style: TextStyle(fontSize: 11.5, color: p.text2)),
+                ),
+              ],
+            ],
           ),
+          const SizedBox(height: 8),
+          if (working && m.status.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  const SizedBox(
+                      width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 10),
+                  Flexible(child: Text(m.status, style: TextStyle(color: p.text2))),
+                ],
+              ),
+            ),
+          for (final it in m.media)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: it.kind == 'video'
+                  ? VideoCard(path: it.path)
+                  : GestureDetector(
+                      onTap: () => Navigator.push<void>(
+                        context,
+                        MaterialPageRoute(builder: (_) => ImageViewerPage(path: it.path)),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: LocalImage(path: it.path, fit: BoxFit.cover),
+                      ),
+                    ),
+            ),
+          if (m.content.isNotEmpty)
+            MarkdownBody(
+              data: m.content,
+              selectable: true,
+              styleSheet: markdownStyle(context),
+              onTapLink: (text, href, title) => openLink(href),
+            ),
+          if (!working && (m.content.isNotEmpty || m.media.isNotEmpty))
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: [
+                  _action(Icons.copy_outlined, 'نسخ', () async {
+                    await Clipboard.setData(ClipboardData(text: m.content));
+                    _snack('تم النسخ');
+                  }),
+                  if (m.media.isNotEmpty)
+                    _action(Icons.ios_share, 'مشاركة / حفظ', () => shareFile(m.media.first.path))
+                  else
+                    _action(Icons.ios_share, 'مشاركة', () => shareText(m.content)),
+                  if (_connectors.any(ConnectorActions.canSend) && m.content.isNotEmpty)
+                    _action(Icons.send_outlined, 'إرسال إلى موصل', () => _sendToConnector(m.content)),
+                  if (isLast)
+                    _action(Icons.refresh, 'إعادة التوليد', () => _regenerate(m)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _action(IconData icon, String tip, VoidCallback onTap) {
+    return IconButton(
+      tooltip: tip,
+      visualDensity: VisualDensity.compact,
+      onPressed: onTap,
+      icon: Icon(icon, size: 18, color: context.pal.text2),
+    );
+  }
+
+  Widget _composer() {
+    final p = context.pal;
+    final hasText = _controller.text.trim().isNotEmpty || _attached.isNotEmpty;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: p.surface,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: p.border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_attached.isNotEmpty)
+                SizedBox(
+                  height: 40,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _attached.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 6),
+                    itemBuilder: (context, i) {
+                      final f = _attached[i];
+                      return InputChip(
+                        avatar: Icon(
+                          switch (FileProcessor.kindOf(f.name)) {
+                            FileKind.image => Icons.image_outlined,
+                            FileKind.video => Icons.videocam_outlined,
+                            _ => Icons.description_outlined,
+                          },
+                          size: 16,
+                        ),
+                        label: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 140),
+                          child: Text(f.name, overflow: TextOverflow.ellipsis),
+                        ),
+                        onDeleted: () => setState(() => _attached.removeAt(i)),
+                      );
+                    },
+                  ),
+                ),
+              if (_activeSkill != null)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: InputChip(
+                      avatar: Icon(Icons.bolt, size: 16, color: p.accent),
+                      label: Text(_activeSkill!.title),
+                      onDeleted: () => setState(() => _activeSkill = null),
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focus,
+                  minLines: 1,
+                  maxLines: 8,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  style: const TextStyle(fontSize: 16.5),
+                  decoration: InputDecoration(
+                    hintText: 'اكتب رسالتك…',
+                    hintStyle: TextStyle(color: p.text2),
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  _roundButton(Icons.add, 'إرفاق', _busy ? null : _showAttachMenu),
+                  _roundButton(Icons.bolt_outlined, 'Skills', _busy ? null : _openSkills,
+                      active: _activeSkill != null),
+                  _roundButton(Icons.hub_outlined, 'الموصلات', _busy ? null : _openConnectors,
+                      active: _connectors.any((c) => c.enabled)),
+                  const Spacer(),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: _busy ? null : _showProviderPicker,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 110),
+                            child: Text(_providerLabel,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 13.5, color: p.text2)),
+                          ),
+                          Icon(Icons.keyboard_arrow_down, size: 18, color: p.text2),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  _busy
+                      ? IconButton.filled(
+                          onPressed: _stop,
+                          style: IconButton.styleFrom(backgroundColor: p.text, foregroundColor: p.bg),
+                          icon: const Icon(Icons.stop_rounded),
+                        )
+                      : IconButton.filled(
+                          onPressed: hasText ? _send : null,
+                          style: IconButton.styleFrom(
+                            backgroundColor: p.accent,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: p.border,
+                            disabledForegroundColor: p.text2,
+                          ),
+                          icon: const Icon(Icons.arrow_upward_rounded),
+                        ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _roundButton(IconData icon, String tip, VoidCallback? onTap, {bool active = false}) {
+    final p = context.pal;
+    return IconButton(
+      tooltip: tip,
+      onPressed: onTap,
+      visualDensity: VisualDensity.compact,
+      icon: Icon(icon, color: active ? p.accent : p.text2),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    final empty = _chat.messages.isEmpty;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          empty ? '' : _chat.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'محادثة جديدة',
+            onPressed: _newChat,
+            icon: const Icon(Icons.edit_square),
+          ),
+        ],
+      ),
+      drawer: _drawer(),
+      body: Column(
+        children: [
+          Expanded(
+            child: empty
+                ? _welcome()
+                : ListView.builder(
+                    controller: _scroll,
+                    padding: const EdgeInsets.only(top: 8, bottom: 12),
+                    itemCount: _chat.messages.length,
+                    itemBuilder: (context, i) {
+                      final m = _chat.messages[i];
+                      return m.role == 'user'
+                          ? _userBubble(m)
+                          : _assistantBlock(m, isLast: i == _chat.messages.length - 1);
+                    },
+                  ),
+          ),
+          _composer(),
         ],
       ),
     );
