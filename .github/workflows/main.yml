@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -42,29 +42,53 @@ jobs:
             echo "android/ already exists"
           fi
 
-      - name: Add INTERNET permission to release manifest
+      - name: Add INTERNET permission and cleartext to AndroidManifest
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>|' "$MANIFEST"
-          sed -i 's|android:name="${applicationName}"|android:name="${applicationName}"\n        android:usesCleartextTraffic="true"|' "$MANIFEST"
-          echo "----- Manifest after patch -----"
-          cat "$MANIFEST"
+          if [ -f "$MANIFEST" ]; then
+            # Add INTERNET and ACCESS_NETWORK_STATE if missing
+            if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+              # Insert after the <manifest ...> opening tag
+              sed -i '0,/<manifest /s|<manifest |<manifest |\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>|' "$MANIFEST" || true
+              # Fallback if the above didn't match well
+              if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+                sed -i 's|<manifest xmlns:android="http://schemas.android.com/apk/res/android">|<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>|' "$MANIFEST" || true
+              fi
+            fi
+            # Add usesCleartextTraffic if missing
+            if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
+              sed -i 's|android:name="${applicationName}"|android:name="${applicationName}"\n        android:usesCleartextTraffic="true"|' "$MANIFEST" || true
+            fi
+            echo "----- Manifest after patch -----"
+            cat "$MANIFEST"
+          else
+            echo "WARNING: AndroidManifest.xml not found"
+          fi
 
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Patch plugins that lack an Android namespace (AGP 8)
+      - name: Patch plugins that lack an Android namespace (AGP 8+)
         run: |
-          for f in $(find "$HOME/.pub-cache/hosted" -path '*/android/build.gradle' 2>/dev/null); do
-            if ! grep -q "namespace" "$f"; then
+          patched=0
+          for f in $(find "$HOME/.pub-cache/hosted" -path '*/android/build.gradle' 2>/dev/null || true); do
+            if ! grep -q "namespace" "$f" 2>/dev/null; then
               dir=$(dirname "$f")
-              pkg=$(grep -o 'package="[^"]*"' "$dir/src/main/AndroidManifest.xml" 2>/dev/null | head -1 | sed 's/package="\(.*\)"/\1/')
+              pkg=$(grep -o 'package="[^"]*"' "$dir/src/main/AndroidManifest.xml" 2>/dev/null | head -1 | sed 's/package="\(.*\)"/\1/' || true)
               if [ -n "$pkg" ]; then
-                sed -i "0,/android {/s//android {\n    namespace \"$pkg\"/" "$f"
+                # Prefer inserting after the android { line
+                if grep -q "android {" "$f"; then
+                  sed -i "0,/android {/s//android {\n    namespace \"$pkg\"/" "$f"
+                else
+                  # Fallback for older style
+                  echo "android { namespace \"$pkg\" }" >> "$f"
+                fi
                 echo "patched $f -> $pkg"
+                patched=$((patched + 1))
               fi
             fi
           done
+          echo "Patched $patched plugin(s)"
 
       - name: Analyze Dart code
         run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
