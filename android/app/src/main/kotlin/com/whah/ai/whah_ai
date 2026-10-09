@@ -1,5 +1,0 @@
-package com.whah.ai.whah_ai
-
-import io.flutter.embedding.android.FlutterActivity
-
-class MainActivity : FlutterActivity()
