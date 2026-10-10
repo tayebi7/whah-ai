@@ -32,26 +32,41 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
+      - name: Backup source files (protect from overwrite)
+        run: |
+          mkdir -p /tmp/whah-backup
+          cp -a lib /tmp/whah-backup/
+          cp pubspec.yaml /tmp/whah-backup/
+          cp -a assets /tmp/whah-backup/ 2>/dev/null || true
+          echo "Source files backed up"
+
       - name: Create Android platform
         run: |
-          set -x
-          # احذف أي android قديم معطوب
           rm -rf android
-          # أنشئ من جديد (بدون --overwrite عشان ما يمس كود التطبيق)
           flutter create . \
             --project-name whah_ai \
             --org com.whah.ai \
-            --platforms=android
-          echo "---- android created ----"
-          ls -la android/
-          ls -la android/app/src/main/ || true
+            --platforms=android \
+            --overwrite
+          echo "android/ created"
+          ls android/
+
+      - name: Restore source files
+        run: |
+          # Restore our real code (in case --overwrite touched anything)
+          rm -rf lib
+          cp -a /tmp/whah-backup/lib .
+          cp /tmp/whah-backup/pubspec.yaml .
+          cp -a /tmp/whah-backup/assets . 2>/dev/null || true
+          echo "Source files restored"
+          head -15 lib/main.dart
 
       - name: Add INTERNET permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ ! -f "$MANIFEST" ]; then
             echo "ERROR: Manifest not found"
-            find android -type f | head -30
+            find android -type f | head -20
             exit 1
           fi
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
@@ -60,6 +75,7 @@ jobs:
           if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
             sed -i 's|android:name="${applicationName}"|android:name="${applicationName}"\n        android:usesCleartextTraffic="true"|' "$MANIFEST"
           fi
+          echo "Manifest patched"
           cat "$MANIFEST"
 
       - name: Get dependencies
@@ -70,12 +86,16 @@ jobs:
 
       - name: Verify main.dart is WHAH AI
         run: |
-          if grep -q "Flutter Demo Home Page\|MyHomePage" lib/main.dart; then
-            echo "ERROR: main.dart was overwritten!"
+          if grep -q "Flutter Demo Home Page\|MyHomePage\|class MyApp" lib/main.dart; then
+            echo "ERROR: main.dart is Flutter demo!"
             exit 1
           fi
-          echo "main.dart is OK"
-          head -12 lib/main.dart
+          if ! grep -q "WahaAI\|ChatPage" lib/main.dart; then
+            echo "ERROR: main.dart does not look like WHAH AI"
+            cat lib/main.dart
+            exit 1
+          fi
+          echo "✅ main.dart is correct (WHAH AI)"
 
       - name: Build APK
         run: flutter build apk --release
