@@ -1,1 +1,114 @@
+name: Build WHAH AI
 
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build WHAH AI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter version
+        run: flutter --version
+
+      - name: Create Android platform (without overwriting existing code)
+        run: |
+          if [ -d "android" ]; then
+            echo "android/ already exists"
+          else
+            echo "Creating android/ platform files only..."
+            # IMPORTANT: NO --overwrite  →  protects lib/main.dart and other source files
+            flutter create . \
+              --project-name whah_ai \
+              --org com.whah.ai \
+              --platforms=android
+          fi
+          ls -la android/ || true
+
+      - name: Add INTERNET + cleartext permissions
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+              sed -i '0,/<manifest[^>]*>/s||&\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>|' "$MANIFEST"
+            fi
+            if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
+              sed -i 's|android:name="${applicationName}"|android:name="${applicationName}"\n        android:usesCleartextTraffic="true"|' "$MANIFEST"
+            fi
+            echo "----- Manifest -----"
+            cat "$MANIFEST"
+          else
+            echo "ERROR: AndroidManifest.xml not found"
+            exit 1
+          fi
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons || true
+
+      - name: Patch plugins missing namespace (AGP 8)
+        run: |
+          patched=0
+          for f in $(find "$HOME/.pub-cache/hosted" -path '*/android/build.gradle' 2>/dev/null || true); do
+            if ! grep -q "namespace" "$f" 2>/dev/null; then
+              dir=$(dirname "$f")
+              pkg=$(grep -oP 'package="\K[^"]+' "$dir/src/main/AndroidManifest.xml" 2>/dev/null | head -1 || true)
+              if [ -n "$pkg" ]; then
+                sed -i "0,/android {/s//android {\n    namespace \"$pkg\"/" "$f" 2>/dev/null || true
+                echo "patched $f -> $pkg"
+                patched=$((patched+1))
+              fi
+            fi
+          done
+          echo "Patched $patched plugins"
+
+      - name: Verify main.dart is still WHAH AI
+        run: |
+          if grep -q "Flutter Demo Home Page\|MyApp\|MyHomePage" lib/main.dart; then
+            echo "ERROR: main.dart was overwritten with Flutter demo template!"
+            exit 1
+          fi
+          if ! grep -q "WahaAI\|ChatPage\|WHAH" lib/main.dart; then
+            echo "ERROR: main.dart does not look like WHAH AI"
+            cat lib/main.dart
+            exit 1
+          fi
+          echo "main.dart is correct (WHAH AI)"
+          head -20 lib/main.dart
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: whah-ai-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
