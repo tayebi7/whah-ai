@@ -32,26 +32,35 @@ jobs:
       - name: Flutter version
         run: flutter --version
 
-      - name: Create Android platform (safe)
+      - name: Create Android platform
         run: |
-          if [ -d "android" ]; then
-            echo "android/ already exists"
-          else
-            flutter create . \
-              --project-name whah_ai \
-              --org com.whah.ai \
-              --platforms=android
-          fi
+          set -x
+          # احذف أي android قديم معطوب
+          rm -rf android
+          # أنشئ من جديد (بدون --overwrite عشان ما يمس كود التطبيق)
+          flutter create . \
+            --project-name whah_ai \
+            --org com.whah.ai \
+            --platforms=android
+          echo "---- android created ----"
+          ls -la android/
+          ls -la android/app/src/main/ || true
 
       - name: Add INTERNET permissions
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "ERROR: Manifest not found"
+            find android -type f | head -30
+            exit 1
+          fi
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i '0,/<manifest[^>]*>/s||&\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>|' "$MANIFEST"
           fi
           if ! grep -q 'usesCleartextTraffic' "$MANIFEST"; then
             sed -i 's|android:name="${applicationName}"|android:name="${applicationName}"\n        android:usesCleartextTraffic="true"|' "$MANIFEST"
           fi
+          cat "$MANIFEST"
 
       - name: Get dependencies
         run: flutter pub get
@@ -62,10 +71,11 @@ jobs:
       - name: Verify main.dart is WHAH AI
         run: |
           if grep -q "Flutter Demo Home Page\|MyHomePage" lib/main.dart; then
-            echo "ERROR: main.dart overwritten!"
+            echo "ERROR: main.dart was overwritten!"
             exit 1
           fi
-          echo "main.dart OK"
+          echo "main.dart is OK"
+          head -12 lib/main.dart
 
       - name: Build APK
         run: flutter build apk --release
