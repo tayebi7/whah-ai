@@ -1,1 +1,27 @@
-
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Waha AI</string>
+    <string name="hint_message">اكتب رسالتك هنا…</string>
+    <string name="btn_send">إرسال</string>
+    <string name="btn_settings">الإعدادات</string>
+    <string name="settings_title">إعدادات المزود</string>
+    <string name="label_api_key">مفتاح API</string>
+    <string name="label_base_url">عنوان الخادم (Base URL)</string>
+    <string name="label_model">اسم النموذج</string>
+    <string name="btn_save">حفظ</string>
+    <string name="btn_cancel">إلغاء</string>
+    <string name="btn_test">اختبار الاتصال</string>
+    <string name="welcome_title">مرحبًا بك في Waha AI 🤖</string>
+    <string name="welcome_subtitle">منصة ذكاء اصطناعي متكاملة</string>
+    <string name="welcome_hint">اضغط ⚙️ لإعداد مزود AI ثم ابدأ المحادثة</string>
+    <string name="error_no_api_key">يرجى إعداد مفتاح API أولاً من الإعدادات ⚙️</string>
+    <string name="error_network">خطأ في الاتصال. تحقق من الإنترنت وحاول مجددًا.</string>
+    <string name="error_api">خطأ من المزود: %s</string>
+    <string name="msg_thinking">جاري التفكير...</string>
+    <string name="msg_test_success">✅ الاتصال ناجح!</string>
+    <string name="msg_test_fail">❌ فشل الاتصال: %s</string>
+    <string name="msg_saved">✅ تم الحفظ</string>
+    <string name="new_chat">محادثة جديدة</string>
+    <string name="default_base_url">https://api.openai.com/v1</string>
+    <string name="default_model">gpt-3.5-turbo</string>
+</resources>
