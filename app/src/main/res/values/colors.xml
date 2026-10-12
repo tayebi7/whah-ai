@@ -1,1 +1,18 @@
-
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#2563EB</color>
+    <color name="primary_dark">#1D4ED8</color>
+    <color name="primary_light">#DBEAFE</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="background">#FFFFFF</color>
+    <color name="surface">#F8FAFC</color>
+    <color name="on_surface">#1E293B</color>
+    <color name="on_surface_secondary">#64748B</color>
+    <color name="user_bubble">#2563EB</color>
+    <color name="user_bubble_text">#FFFFFF</color>
+    <color name="ai_bubble">#F1F5F9</color>
+    <color name="ai_bubble_text">#1E293B</color>
+    <color name="input_bg">#F1F5F9</color>
+    <color name="divider">#E2E8F0</color>
+    <color name="error">#EF4444</color>
+</resources>
