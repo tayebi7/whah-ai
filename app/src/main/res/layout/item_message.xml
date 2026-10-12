@@ -11,13 +11,13 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:maxWidth="300dp"
         android:padding="12dp">
 
         <TextView
             android:id="@+id/textMessage"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:maxWidth="280dp"
             android:textSize="15sp"
             android:lineSpacingExtra="4dp"
             android:textDirection="anyRtl" />
