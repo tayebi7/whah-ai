@@ -1,5 +1,6 @@
 "use client";
 
+import { saveBlobAs } from "../local/save";
 import { useEffect, useRef, useState } from "react";
 import { type Asset } from "./api";
 import { useApp } from "./app";
@@ -129,14 +130,7 @@ export default function Chat() {
 
   function exportChat() {
     const md = messages.map((m) => `**${m.role === "user" ? t("you") : "Waha AI"}:**\n\n${m.content}`).join("\n\n---\n\n");
-    const url = URL.createObjectURL(new Blob([md], { type: "text/markdown;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `waha-chat-${new Date().toISOString().slice(0, 10)}.md`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    void saveBlobAs(new Blob([md], { type: "text/markdown;charset=utf-8" }), `waha-chat-${new Date().toISOString().slice(0, 10)}.md`);
   }
 
   return (

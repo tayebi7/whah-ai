@@ -1,5 +1,6 @@
 "use client";
 
+import { saveBlobAs } from "../local/save";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { describeError, fmtSize, type Asset, type Job } from "./api";
 import { useApp } from "./app";
@@ -35,15 +36,7 @@ export function useDownload() {
   return useCallback(
     async (a: Pick<Asset, "id" | "name">) => {
       try {
-        const blob = await api.blob(a.id);
-        const url = URL.createObjectURL(blob);
-        const el = document.createElement("a");
-        el.href = url;
-        el.download = a.name;
-        document.body.appendChild(el);
-        el.click();
-        el.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        await saveBlobAs(await api.blob(a.id), a.name);
       } catch (e) {
         toast(`${t("downloadFailed")}: ${describeError(e)}`, "error");
       }

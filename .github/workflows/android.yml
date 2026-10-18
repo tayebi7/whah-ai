@@ -3,8 +3,8 @@ name: Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths: ["mobile/**", ".github/workflows/android.yml", "public/logo-mark.svg"]
+    branches: [main, on-device-engine]
+    paths: ["mobile/**", "src/**", "public/**", "next.config.mjs", "package.json", ".github/workflows/android.yml"]
 
 permissions:
   contents: write
@@ -21,6 +21,14 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - name: Build the app as static files (no server: the app answers its own /api calls)
+        run: |
+          npm install --no-audit --no-fund
+          rm -rf src/app/api
+          WAHA_STATIC=1 NEXT_PUBLIC_WAHA_LOCAL=1 npx next build
+          mkdir -p mobile/www
+          cp -r out/. mobile/www/
+          ls mobile/www | head
       - name: Install Capacitor and generate the Android project
         working-directory: mobile
         run: |
@@ -53,8 +61,9 @@ jobs:
           name: waha-ai-apk
           path: waha-ai.apk
       - name: Publish to a GitHub Release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="apk-${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" waha-ai.apk --title "Waha AI APK #${GITHUB_RUN_NUMBER}" --notes "Debug-signed Android APK. Install it, then enter your Waha AI server address on first launch." --latest
+          gh release create "$TAG" waha-ai.apk --title "Waha AI APK #${GITHUB_RUN_NUMBER}" --notes "Debug-signed Android APK. Fully on-device: no server. Open Settings, add your AI providers (NVIDIA, OpenRouter, DeepSeek, ...) and use the app." --latest

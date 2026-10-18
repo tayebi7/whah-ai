@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import "../local/boot";
 import Books from "../ui/Books";
 import Chat from "../ui/Chat";
 import Docs from "../ui/Docs";
@@ -54,7 +55,7 @@ function Shell({ tab, setTab, lang, setLang, dark, setDark }: { tab: Tab; setTab
         {/* All tabs stay mounted so a running chat or form is not lost when switching. */}
         <div hidden={tab !== "chat"} className="pane"><Chat /></div>
         <div hidden={tab !== "studio"} className="pane scroll"><Studio /></div>
-        <div hidden={tab !== "docs"} className="pane scroll"><Docs /></div>
+        <div hidden={tab !== "docs"} className="pane scroll"><Docs active={tab === "docs"} /></div>
         <div hidden={tab !== "books"} className="pane scroll"><Books /></div>
         <div hidden={tab !== "settings"} className="pane scroll"><Settings /></div>
       </main>

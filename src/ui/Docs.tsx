@@ -8,8 +8,8 @@ import { AssetView, ErrorBox, Modal, UploadButtons } from "./common";
 type Conv = { from: string; to: string; available: boolean; tool: string; note?: string };
 type Health = { features: { ocr: boolean; documentConversion: boolean } };
 
-export default function Docs() {
-  const { t, api, lang, toast, askAboutFiles, token } = useApp();
+export default function Docs({ active = true }: { active?: boolean }) {
+  const { t, api, lang, toast, askAboutFiles, token, providers } = useApp();
   const [items, setItems] = useState<Asset[]>([]);
   const [total, setTotal] = useState(0);
   const [kind, setKind] = useState<"" | "image" | "document" | "video">("");
@@ -37,14 +37,15 @@ export default function Docs() {
   }, [api, kind, limit]);
 
   // Reload whenever the access token changes: the first load may have happened before it was entered.
+  // Reload on token change and whenever the tab is opened, so files made elsewhere (studio, books) show up.
   useEffect(() => {
-    void load();
-  }, [load, token]);
+    if (active) void load();
+  }, [load, token, active]);
 
   useEffect(() => {
     api.get<{ conversions: Conv[] }>("/api/convert").then((d) => setConvs(d.conversions)).catch(() => undefined);
     api.get<Health>("/api/health").then(setHealth).catch(() => undefined);
-  }, [api, token]);
+  }, [api, token, providers]);
 
   const targets = useMemo(() => {
     const m = new Map<string, Conv[]>();

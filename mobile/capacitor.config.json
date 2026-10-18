@@ -2,6 +2,16 @@
   "appId": "ai.waha.app",
   "appName": "Waha AI",
   "webDir": "www",
-  "server": { "androidScheme": "https", "cleartext": true, "allowNavigation": ["*"] },
-  "android": { "allowMixedContent": true }
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
 }

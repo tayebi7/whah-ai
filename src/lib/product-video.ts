@@ -3,7 +3,7 @@ import { generateImages } from "./images";
 import type { JobContext } from "./jobs";
 import type { Provider } from "./providers";
 import { chatOnce, parseJsonLoose } from "./router";
-import { LANGS, type ProductVideoInput } from "./video-core";
+import { LANGS, type ProductVideoInput, type Slide } from "./video-core";
 import { renderSlideshow } from "./video-slideshow";
 export * from "./video-core";
 
