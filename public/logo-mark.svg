@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Waha AI">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0EA5A4"/>
+      <stop offset="1" stop-color="#1E3A8A"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+  <circle cx="256" cy="196" r="74" fill="url(#sun)" opacity="0.95"/>
+  <!-- palm trunk -->
+  <path d="M250 430 C246 360 252 300 262 232" fill="none" stroke="#fff" stroke-width="14" stroke-linecap="round"/>
+  <!-- palm fronds -->
+  <path d="M262 232 C220 200 170 206 138 238" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
+  <path d="M262 232 C300 196 352 200 388 232" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
+  <path d="M262 232 C236 178 206 156 170 152" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
+  <path d="M262 232 C292 176 322 154 358 150" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
+  <path d="M262 232 C262 190 266 160 276 128" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
+  <!-- AI spark -->
+  <path d="M388 112 l9 24 24 9 -24 9 -9 24 -9 -24 -24 -9 24 -9z" fill="#fff"/>
+  <!-- water / oasis waves -->
+  <path d="M100 410 q39 -26 78 0 t78 0 t78 0 t78 0" fill="none" stroke="#99F6E4" stroke-width="12" stroke-linecap="round"/>
+  <path d="M130 448 q31 -20 62 0 t62 0 t62 0" fill="none" stroke="#5EEAD4" stroke-width="10" stroke-linecap="round" opacity="0.8"/>
+</svg>
