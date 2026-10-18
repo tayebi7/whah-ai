@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Waha AI</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f5f7fb; --card:#fff; --fg:#14213d; --muted:#5b6b86; --brand:#0f9d8a; --line:#dbe2ee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0e1420; --card:#161f30; --fg:#eaf0fb; --muted:#9db0cc; --line:#27344c; } }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px 16px;
+         background:var(--bg); color:var(--fg); font-family: system-ui, "Noto Sans Arabic", sans-serif; }
+  main { width:100%; max-width:420px; background:var(--card); border:1px solid var(--line); border-radius:20px; padding:24px; }
+  h1 { margin:0 0 4px; font-size:24px; } p { margin:0 0 18px; color:var(--muted); line-height:1.6; font-size:14px; }
+  label { display:block; font-weight:600; margin-bottom:6px; font-size:14px; }
+  input { width:100%; padding:14px; font-size:16px; border-radius:12px; border:1px solid var(--line); background:transparent; color:inherit; direction:ltr; text-align:left; }
+  button { width:100%; margin-top:14px; padding:14px; font-size:16px; font-weight:700; border:0; border-radius:12px; background:var(--brand); color:#fff; }
+  .err { color:#d33; font-size:13px; min-height:18px; margin-top:8px; }
+  small { display:block; margin-top:16px; color:var(--muted); line-height:1.6; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Waha AI &middot; واحة</h1>
+  <p>أدخل عنوان خادم واحة الخاص بك (مثل https://waha.example.com) لفتحه داخل التطبيق.</p>
+  <label for="url">عنوان الخادم / Server URL</label>
+  <input id="url" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://your-server.example.com">
+  <div class="err" id="err"></div>
+  <button id="go">فتح التطبيق</button>
+  <small>يُحفظ العنوان على هاتفك فقط. للرجوع إلى هذه الشاشة اضغط زر الرجوع في أندرويد.</small>
+</main>
+<script>
+  var KEY = "waha_server_url";
+  var input = document.getElementById("url"), err = document.getElementById("err");
+  try { input.value = localStorage.getItem(KEY) || ""; } catch (e) {}
+  function open() {
+    var v = input.value.trim();
+    if (v && !/^https?:\/\//i.test(v)) v = "https://" + v;
+    try { var u = new URL(v); if (!/^https?:$/.test(u.protocol)) throw 0; v = u.toString(); }
+    catch (e) { err.textContent = "عنوان غير صالح / Invalid URL"; return; }
+    try { localStorage.setItem(KEY, v); } catch (e) {}
+    window.location.href = v;
+  }
+  document.getElementById("go").addEventListener("click", open);
+  input.addEventListener("keydown", function (e) { if (e.key === "Enter") open(); });
+</script>
+</body>
+</html>

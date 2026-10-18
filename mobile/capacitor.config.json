@@ -1,0 +1,7 @@
+{
+  "appId": "ai.waha.app",
+  "appName": "Waha AI",
+  "webDir": "www",
+  "server": { "androidScheme": "https", "cleartext": true, "allowNavigation": ["*"] },
+  "android": { "allowMixedContent": true }
+}
