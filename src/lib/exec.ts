@@ -30,7 +30,7 @@ export type RunOptions = { timeoutMs?: number; cwd?: string; home?: string; maxO
 export function run(cmd: string, args: string[], o: RunOptions = {}): Promise<{ stdout: Buffer; stderr: string }> {
   if (!hasTool(cmd)) return Promise.reject(new ToolMissingError(cmd));
   return new Promise((resolve, reject) => {
-    const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, LANG: "C.UTF-8", HOME: o.home ?? os.tmpdir(), TMPDIR: o.home ?? os.tmpdir() };
+    const env: Record<string, string | undefined> = { PATH: process.env.PATH, LANG: "C.UTF-8", HOME: o.home ?? os.tmpdir(), TMPDIR: o.home ?? os.tmpdir() };
     const child = spawn(cmd, args, { cwd: o.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const out: Buffer[] = [];
     let outLen = 0;
