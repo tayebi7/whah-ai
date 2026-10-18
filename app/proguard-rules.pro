@@ -1,5 +1,0 @@
--keepattributes Signature
--keepattributes *Annotation*
--keep class com.wahaai.app.** { *; }
--keep class com.google.gson.** { *; }
--keep class okhttp3.** { *; }
