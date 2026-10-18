@@ -21,7 +21,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: Build the app as static files (no server: the app answers its own /api calls)
+      - name: Build the app as static files (the app answers its own API calls, no server)
         run: |
           npm install --no-audit --no-fund
           rm -rf src/app/api
