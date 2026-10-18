@@ -19,7 +19,7 @@ npm test                     # 51 اختبارًا (وحدات + تكامل عل
 npm run build && npm start
 ```
 **أدوات النظام المطلوبة** (للتحويل والفيديو والكتب وOCR): `ffmpeg`, `pandoc`, `libreoffice`, `poppler-utils`, `tesseract-ocr` (+ `tesseract-ocr-ara` للعربية). على Ubuntu:
-`sudo apt install ffmpeg pandoc libreoffice-writer poppler-utils tesseract-ocr tesseract-ocr-ara fonts-noto-core`
+`sudo apt install ffmpeg pandoc libreoffice-writer libreoffice-calc poppler-utils tesseract-ocr tesseract-ocr-ara fonts-noto-core`
 
 ## الإعدادات البيئية
 انظر `.env.example`: `WAHA_ACCESS_TOKEN`, `WAHA_ENCRYPTION_KEY`, `WAHA_DATA_DIR`, `WAHA_ALLOW_LOCAL`, `WAHA_MAX_UPLOAD_MB`, `WAHA_MAX_GENERATED_MB`, `WAHA_RETENTION_DAYS`, `WAHA_FONT_FILE`, `WAHA_PROVIDERS`.
