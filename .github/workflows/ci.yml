@@ -25,7 +25,13 @@ jobs:
           code=$?
           sed -E 's/^([^(]+)\(([0-9]+),([0-9]+)\): (.*)$/::error file=\1,line=\2,col=\3::\4/' tsc.log | head -60
           exit $code
-      - run: npm test
+      - name: Test
+        run: |
+          set +e
+          npx tsx --test --test-reporter=spec tests/*.test.ts > test.log 2>&1
+          code=$?
+          grep -nE "✖|Error|expected|actual|not ok|ENOENT|missing" test.log | head -40 | sed -E 's/^/::error::/' | tr '\r' ' '
+          exit $code
       - run: npm run build
       - run: npm audit --audit-level=high
         continue-on-error: true
