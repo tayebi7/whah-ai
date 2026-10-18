@@ -1,45 +1,11 @@
 import type { Asset } from "./assets";
-import { isRecord } from "./http";
 import { generateImages } from "./images";
 import type { JobContext } from "./jobs";
 import type { Provider } from "./providers";
 import { chatOnce, parseJsonLoose } from "./router";
-import { ASPECTS, renderSlideshow, type Aspect, type Slide } from "./video-slideshow";
-
-export const LANGS = { ar: "Arabic", en: "English", fr: "French" } as const;
-export type Lang = keyof typeof LANGS;
-
-export type ProductVideoInput = {
-  productName: string;
-  description: string;
-  language: Lang;
-  photoAssetIds: string[];
-  generateImages: number;
-  aspect: Aspect;
-  secondsPerSlide: number;
-};
-
-export function validateProductVideo(b: unknown): { value?: ProductVideoInput; errors: string[] } {
-  const errors: string[] = [];
-  if (!isRecord(b)) return { errors: ["body must be an object"] };
-  const name = typeof b.productName === "string" ? b.productName.trim() : "";
-  if (!name || name.length > 120) errors.push("productName: required, up to 120 characters");
-  const description = typeof b.description === "string" ? b.description.trim() : "";
-  if (description.length > 2000) errors.push("description: up to 2000 characters");
-  const language = (b.language ?? "en") as string;
-  if (!(language in LANGS)) errors.push('language: must be "ar", "en" or "fr"');
-  const photos = b.photoAssetIds ?? [];
-  if (!Array.isArray(photos) || photos.length > 10 || photos.some((p) => typeof p !== "string")) errors.push("photoAssetIds: up to 10 file ids");
-  const gen = b.generateImages === undefined ? 0 : Number(b.generateImages);
-  if (!Number.isInteger(gen) || gen < 0 || gen > 4) errors.push("generateImages: whole number from 0 to 4");
-  const aspect = (b.aspect ?? "16:9") as string;
-  if (!(aspect in ASPECTS)) errors.push('aspect: must be "16:9", "9:16" or "1:1"');
-  const sec = b.secondsPerSlide === undefined ? 3 : Number(b.secondsPerSlide);
-  if (!(sec >= 1 && sec <= 10)) errors.push("secondsPerSlide: between 1 and 10");
-  if (!errors.length && (photos as string[]).length + gen < 1) errors.push("Add at least one product photo or ask for generated images");
-  if (errors.length) return { errors };
-  return { value: { productName: name, description, language: language as Lang, photoAssetIds: photos as string[], generateImages: gen, aspect: aspect as Aspect, secondsPerSlide: sec }, errors };
-}
+import { LANGS, type ProductVideoInput } from "./video-core";
+import { renderSlideshow } from "./video-slideshow";
+export * from "./video-core";
 
 /** Product photos (+ optional AI images) -> captioned promo video. Returns [video, ...generated images]. */
 export async function runProductVideo(input: ProductVideoInput, providers: Provider[], ctx: JobContext): Promise<string[]> {

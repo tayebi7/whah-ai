@@ -3,12 +3,9 @@ import path from "node:path";
 import { type Asset, readAssetData, saveAsset } from "./assets";
 import { run, semaphore, withTempDir } from "./exec";
 import type { JobContext } from "./jobs";
-import { isRecord } from "./http";
+import { ASPECTS, wrapCaption, type SlideshowInput } from "./video-core";
 
-export const ASPECTS = { "16:9": [1280, 720], "9:16": [720, 1280], "1:1": [1024, 1024] } as const;
-export type Aspect = keyof typeof ASPECTS;
-export type Slide = { assetId: string; caption?: string };
-export type SlideshowInput = { slides: Slide[]; aspect: Aspect; secondsPerSlide: number; kenBurns: boolean };
+export * from "./video-core";
 
 const FPS = 25;
 const heavy = semaphore(1);
@@ -33,43 +30,6 @@ export async function findFont(): Promise<string | undefined> {
     }
   }
   return undefined;
-}
-
-export function validateSlideshow(b: unknown): { value?: SlideshowInput; errors: string[] } {
-  const errors: string[] = [];
-  if (!isRecord(b)) return { errors: ["body must be an object"] };
-  const slides = b.slides;
-  if (!Array.isArray(slides) || slides.length < 1 || slides.length > 12) errors.push("slides: provide 1 to 12 slides");
-  const out: Slide[] = [];
-  if (Array.isArray(slides)) {
-    slides.forEach((s, i) => {
-      if (!isRecord(s) || typeof s.assetId !== "string") return void errors.push(`slides[${i}]: assetId is required`);
-      if (s.caption !== undefined && (typeof s.caption !== "string" || s.caption.length > 200)) return void errors.push(`slides[${i}]: caption must be text up to 200 characters`);
-      out.push({ assetId: s.assetId, caption: typeof s.caption === "string" && s.caption.trim() ? s.caption.trim() : undefined });
-    });
-  }
-  const aspect = (b.aspect ?? "16:9") as string;
-  if (!(aspect in ASPECTS)) errors.push('aspect: must be "16:9", "9:16" or "1:1"');
-  const sec = b.secondsPerSlide === undefined ? 3 : Number(b.secondsPerSlide);
-  if (!(sec >= 1 && sec <= 10)) errors.push("secondsPerSlide: must be between 1 and 10");
-  if (b.kenBurns !== undefined && typeof b.kenBurns !== "boolean") errors.push("kenBurns: must be true or false");
-  if (errors.length) return { errors };
-  return { value: { slides: out, aspect: aspect as Aspect, secondsPerSlide: sec, kenBurns: b.kenBurns !== false }, errors };
-}
-
-/** Wraps text to roughly `max` characters per line, breaking at spaces. */
-export function wrapCaption(text: string, max: number): string {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    if (cur && (cur + " " + w).length > max) {
-      lines.push(cur);
-      cur = w;
-    } else cur = cur ? `${cur} ${w}` : w;
-  }
-  if (cur) lines.push(cur);
-  return lines.slice(0, 4).join("\n");
 }
 
 const esc = (p: string) => p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
