@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PRESETS } from "../lib/presets";
 import { describeError, type PubProvider } from "./api";
 import { useApp } from "./app";
@@ -88,6 +88,22 @@ export default function Settings() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [tests, setTests] = useState<Record<string, TestResult | "running">>({});
   const [confirmDel, setConfirmDel] = useState<PubProvider | null>(null);
+  const [isLocal, setIsLocal] = useState(false);
+  const [net, setNet] = useState<{ name: string; ok: boolean; ms: number; detail: string }[] | "running" | null>(null);
+
+  useEffect(() => {
+    api.get<{ local?: boolean }>("/api/health").then((h) => setIsLocal(!!h.local)).catch(() => undefined);
+  }, [api]);
+
+  async function checkNet() {
+    setNet("running");
+    try {
+      setNet((await api.post<{ results: { name: string; ok: boolean; ms: number; detail: string }[] }>("/api/netcheck")).results);
+    } catch (e) {
+      setNet(null);
+      toast(describeError(e), "error");
+    }
+  }
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
   const stored = providers.filter((p) => p.source !== "env");
@@ -195,6 +211,27 @@ export default function Settings() {
       </div>
 
       {providersLoaded && providers.length === 0 && <div className="card empty-card"><p>{t("noProviders")}</p></div>}
+
+      {isLocal && (
+        <div className="card" data-testid="netcheck">
+          <div className="row between wrap">
+            <div>
+              <strong>{t("netTitle")}</strong>
+              <p className="muted small">{t("netHelp")}</p>
+            </div>
+            <button className="btn sm" onClick={() => void checkNet()} disabled={net === "running"}>{net === "running" ? t("netRunning") : t("netRun")}</button>
+          </div>
+          {Array.isArray(net) && (
+            <ul className="test">
+              {net.map((r, i) => (
+                <li key={i}>
+                  <span>{r.ok ? "✓" : "✗"}</span> <strong dir="auto">{r.name}</strong> ({r.ms} ms): <span dir="auto">{r.detail}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {providers.some((p) => p.enabled) && (
         <div className="card" data-testid="routing">
@@ -356,7 +393,7 @@ export default function Settings() {
               <summary>{t("advanced")}</summary>
               <div className="form-grid">
                 <Field label={t("fPriority")}><input type="number" min={0} value={form.priority} onChange={(e) => set("priority", e.target.value)} placeholder="100" /></Field>
-                <Field label={t("fTimeout")}><input type="number" min={1000} value={form.timeoutMs} onChange={(e) => set("timeoutMs", e.target.value)} placeholder="30000" /></Field>
+                <Field label={t("fTimeout")}><input type="number" min={1000} value={form.timeoutMs} onChange={(e) => set("timeoutMs", e.target.value)} placeholder="90000" /></Field>
                 <Field label={t("fRetries")}><input type="number" min={0} max={5} value={form.maxRetries} onChange={(e) => set("maxRetries", e.target.value)} placeholder="2" /></Field>
                 <Field label={t("fOrg")}><input dir="ltr" value={form.orgId} onChange={(e) => set("orgId", e.target.value)} /></Field>
                 <Field label={t("fHeaders")} hint={form.editingId ? t("fHeadersKeep") : undefined}>

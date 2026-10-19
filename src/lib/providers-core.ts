@@ -251,7 +251,7 @@ export function buildProvider(v: ProviderInput): Provider {
     ...(v.headers && Object.keys(v.headers).length ? { headers: v.headers } : {}),
     priority: v.priority ?? 100,
     enabled: v.enabled ?? true,
-    timeoutMs: v.timeoutMs ?? 30_000,
+    timeoutMs: v.timeoutMs ?? 90_000,
     maxRetries: v.maxRetries ?? 2,
     supportsVision: v.supportsVision ?? false,
     noAttachments: v.noAttachments ?? false,

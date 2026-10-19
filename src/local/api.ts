@@ -8,6 +8,7 @@ import { capabilitiesOf, toPublic } from "../lib/providers-core";
 import { redact } from "../lib/redact";
 import { RouterError, chatOnce, routeChat } from "../lib/router";
 import { describeStatus } from "../lib/router";
+import { describeNetError } from "../lib/net-errors";
 import { providerFetch } from "../lib/provider-http";
 import { validateBook } from "../lib/books-core";
 import { validateProductVideo, validateSlideshow } from "../lib/video-core";
@@ -96,20 +97,20 @@ async function testRoute(id: string, req: Request): Promise<Response> {
   const steps: Step[] = [];
   const proto = p.protocol ?? "openai";
   try {
-    const r = await providerFetch(p, "/models", { timeoutMs: Math.min(p.timeoutMs, 15_000), signal: req.signal, fetchImpl: providerFetchImpl });
+    const r = await providerFetch(p, "/models", { timeoutMs: Math.min(p.timeoutMs, 30_000), signal: req.signal, fetchImpl: providerFetchImpl });
     steps.push({ name: "connection", ok: r.ok, detail: r.ok ? "Reached the provider and the credentials were accepted" : r.status === 404 ? "Reachable (this provider has no /models endpoint, which is normal for some gateways)" : describeStatus(r.status) });
     if (!r.ok && r.status === 404) steps[0].ok = true;
   } catch (e) {
-    steps.push({ name: "connection", ok: false, detail: e instanceof Error && e.name === "TimeoutError" ? "Timed out" : "Could not connect (check the URL and your internet connection)" });
+    steps.push({ name: "connection", ok: false, detail: `Could not connect: ${redact(describeNetError(e), [p.apiKey])}` });
   }
   if (wantChat && p.model && steps[0].ok) {
     try {
       const path = proto === "anthropic" ? "/messages" : proto === "gemini" ? `/models/${encodeURIComponent(p.model.replace(/^models\//, ""))}:generateContent` : "/chat/completions";
       const payload = proto === "anthropic" ? { model: p.model, max_tokens: 5, messages: [{ role: "user", content: "Reply with: ok" }] } : proto === "gemini" ? { contents: [{ role: "user", parts: [{ text: "Reply with: ok" }] }] } : { model: p.model, messages: [{ role: "user", content: "Reply with: ok" }], max_tokens: 5 };
-      const r = await providerFetch(p, path, { method: "POST", body: JSON.stringify(payload), timeoutMs: Math.min(p.timeoutMs, 30_000), signal: req.signal, fetchImpl: providerFetchImpl });
+      const r = await providerFetch(p, path, { method: "POST", body: JSON.stringify(payload), timeoutMs: Math.min(p.timeoutMs, 90_000), signal: req.signal, fetchImpl: providerFetchImpl });
       steps.push({ name: "chat model", ok: r.ok, detail: r.ok ? `Model "${p.model}" answered` : describeStatus(r.status) });
     } catch (e) {
-      steps.push({ name: "chat model", ok: false, detail: e instanceof Error && e.name === "TimeoutError" ? "Timed out" : "Could not connect" });
+      steps.push({ name: "chat model", ok: false, detail: `Could not connect: ${redact(describeNetError(e), [p.apiKey])}` });
     }
   }
   return json(200, { ok: steps.every((s) => s.ok), steps });
@@ -125,8 +126,8 @@ async function modelsRoute(id: string, req: Request): Promise<Response> {
     const raw = (data.data ?? data.models ?? []) as { id?: unknown; name?: unknown }[];
     const ids = raw.map((m) => (typeof m.id === "string" ? m.id : typeof m.name === "string" ? m.name.replace(/^models\//, "") : "")).filter(Boolean);
     return json(200, { models: [...new Set(ids)].sort().slice(0, 500) });
-  } catch {
-    return json(502, { error: "Could not reach the provider. Enter the model id manually." });
+  } catch (e) {
+    return json(502, { error: `Could not reach the provider: ${redact(describeNetError(e), [p.apiKey])}. Enter the model id manually.` });
   }
 }
 
@@ -184,6 +185,32 @@ export async function handleApi(req: Request): Promise<Response> {
         const s = providerStatus(e instanceof Error ? e.message : "");
         return s ? json(s, { error: (e as Error).message }) : fail(e);
       }
+    }
+
+    // ------------------------------------------------ connection check
+    if (path === "/api/netcheck" && m === "POST") {
+      const { providers } = await loadAllProviders();
+      const targets = [
+        { name: "Internet (Google)", url: "https://www.google.com/generate_204" },
+        { name: "Internet (Cloudflare)", url: "https://www.cloudflare.com/cdn-cgi/trace" },
+        ...providers.filter((p) => p.enabled).map((p) => ({ name: p.name, url: p.baseUrl, key: p.apiKey })),
+      ];
+      const results = await Promise.all(
+        targets.map(async (t) => {
+          const t0 = Date.now();
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 15_000);
+          try {
+            const r = await netFetch(t.url, { method: "GET", signal: ctrl.signal });
+            return { name: t.name, ok: true, ms: Date.now() - t0, detail: `Reachable (HTTP ${r.status})` };
+          } catch (e) {
+            return { name: t.name, ok: false, ms: Date.now() - t0, detail: redact(ctrl.signal.aborted ? "no answer within 15 seconds (slow or blocked network)" : describeNetError(e), "key" in t && t.key ? [t.key] : []) };
+          } finally {
+            clearTimeout(timer);
+          }
+        }),
+      );
+      return json(200, { results });
     }
 
     // ------------------------------------------------ health

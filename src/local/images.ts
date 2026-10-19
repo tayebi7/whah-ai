@@ -1,5 +1,6 @@
 import { providerFetch, TimeoutError } from "../lib/provider-http";
 import { capabilitiesOf, type Provider } from "../lib/providers-core";
+import { describeNetError } from "../lib/net-errors";
 import { redact } from "../lib/redact";
 import { breakerFail, breakerOk, breakerOpen, describeStatus, type Attempt } from "../lib/router";
 import { saveAsset, fromBase64, sniffImage, type Asset } from "./assets";
@@ -77,7 +78,7 @@ export async function generateImages(providers: Provider[], r: ImageRequest): Pr
     } catch (e) {
       if (r.signal?.aborted) throw new ImageError("Request cancelled", attempts);
       breakerFail(p.id, Date.now());
-      attempts.push({ providerId: p.id, reason: e instanceof TimeoutError ? "timed out (not retried: the image may still be billed)" : redact(e instanceof Error ? e.message : "request failed", [p.apiKey]).slice(0, 160) });
+      attempts.push({ providerId: p.id, reason: e instanceof TimeoutError ? "timed out (not retried: the image may still be billed)" : redact(describeNetError(e), [p.apiKey]).slice(0, 260) });
     }
   }
   throw new ImageError("All image providers failed", attempts);

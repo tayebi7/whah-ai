@@ -72,6 +72,9 @@ note("real HTTPS provider (openrouter.ai) lists models", r?.status === 200 && /"
 r = await api("POST", "/api/providers/openrouter/test", {});
 note("real HTTPS provider connection test", r?.status === 200 && /"connection"/.test(r.text), JSON.stringify(r));
 
+r = await api("POST", "/api/netcheck", {});
+note("connection check reports the internet and each provider", r?.status === 200 && /Internet \(Google\)/.test(r.text) && /"ok":true/.test(r.text), JSON.stringify(r));
+
 const failed = results.filter((x) => !x.ok);
 const lines = results.map((x) => `${x.ok ? "PASS" : "FAIL"} ${x.name}${x.ok ? "" : " :: " + x.detail}`);
 let logcat = "";

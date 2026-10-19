@@ -49,6 +49,10 @@ jobs:
             done
           fi
           cat "$M"
+      - name: Use the fixed debug key (so new builds install over old ones)
+        run: |
+          mkdir -p ~/.android
+          cp mobile/waha-debug.keystore ~/.android/debug.keystore
       - name: Sync and build debug APK
         working-directory: mobile
         run: |

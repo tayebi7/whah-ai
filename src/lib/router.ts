@@ -1,5 +1,7 @@
 import { buildChatRequest, collectText, normalizeStream, type ChatMessage } from "./adapters";
+import { describeNetError } from "./net-errors";
 import type { Provider } from "./providers";
+import { redact } from "./redact";
 
 export type { ChatMessage, ChatPart } from "./adapters";
 export type Attempt = { providerId: string; reason: string };
@@ -123,7 +125,7 @@ export async function routeChat(providers: Provider[], messages: ChatMessage[], 
       let res: Response;
       try {
         res = await doFetch(req.url, { method: "POST", redirect: "error", headers: req.headers, body: req.body, signal: ctrl.signal });
-      } catch {
+      } catch (netErr) {
         clearTimeout(timer);
         opts.signal?.removeEventListener("abort", onAbort);
         if (opts.signal?.aborted) throw new RouterError("Request cancelled", attempts);
@@ -136,7 +138,7 @@ export async function routeChat(providers: Provider[], messages: ChatMessage[], 
           await sleep(backoffDelay(n, opts.random)); // connection error before any response: safe to retry
           continue;
         }
-        attempts.push({ providerId: provider.id, reason: "connection failed" });
+        attempts.push({ providerId: provider.id, reason: `connection failed: ${redact(describeNetError(netErr), [provider.apiKey])}` });
         break;
       }
       clearTimeout(timer);
