@@ -3,7 +3,7 @@ name: Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, on-device-engine]
+    branches: [main, on-device-engine, android-e2e]
     paths: ["mobile/**", "src/**", "public/**", "next.config.mjs", "package.json", ".github/workflows/android.yml"]
 
 permissions:
@@ -67,3 +67,29 @@ jobs:
         run: |
           TAG="apk-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" waha-ai.apk --title "Waha AI APK #${GITHUB_RUN_NUMBER}" --notes "Debug-signed Android APK. Fully on-device: no server. Open Settings, add your AI providers (NVIDIA, OpenRouter, DeepSeek, ...) and use the app." --latest
+
+  e2e:
+    needs: apk
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: waha-ai-apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run the APK on an emulator and exercise the real network path
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: bash scripts/android-e2e.sh
