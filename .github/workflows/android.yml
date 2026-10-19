@@ -60,7 +60,7 @@ jobs:
           cd android && ./gradlew assembleDebug --no-daemon
       - name: Name the APK
         run: cp mobile/android/app/build/outputs/apk/debug/app-debug.apk waha-ai.apk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: waha-ai-apk
           path: waha-ai.apk
