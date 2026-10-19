@@ -196,6 +196,30 @@ export default function Settings() {
 
       {providersLoaded && providers.length === 0 && <div className="card empty-card"><p>{t("noProviders")}</p></div>}
 
+      {providers.some((p) => p.enabled) && (
+        <div className="card" data-testid="routing">
+          <strong>{t("routeTitle")}</strong>
+          <p className="muted small">{t("routeHelp")}</p>
+          <ul className="route-list">
+            {(
+              [
+                ["routeChat", "chat"],
+                ["routeVision", "vision"],
+                ["routeImage", "image"],
+                ["routeVideo", "video"],
+              ] as const
+            ).map(([label, cap]) => {
+              const names = providers.filter((p) => p.enabled && p.capabilities[cap]).map((p) => p.name);
+              return (
+                <li key={cap}>
+                  <span>{t(label)}</span>: <strong dir="auto">{names.length ? names.join(" → ") : t("routeNone")}</strong>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       <div className="stack">
         {providers.map((p, idx) => {
           const test = tests[p.id];
