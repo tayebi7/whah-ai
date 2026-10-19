@@ -2,7 +2,7 @@ import { fail } from "../../../../../lib/api-errors";
 import { guard, isRecord, json, readJson } from "../../../../../lib/http";
 import { providerFetch } from "../../../../../lib/provider-http";
 import { loadAllProviders } from "../../../../../lib/providers";
-import { describeStatus } from "../../../../../lib/router";
+import { describeStatus, errorDetail } from "../../../../../lib/router";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +42,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         const payload =
           proto === "anthropic" ? { model: p.model, max_tokens: 5, messages: [{ role: "user", content: "Reply with: ok" }] } : proto === "gemini" ? { contents: [{ role: "user", parts: [{ text: "Reply with: ok" }] }] } : { model: p.model, messages: [{ role: "user", content: "Reply with: ok" }], max_tokens: 5 };
         const r = await providerFetch(p, path, { method: "POST", body: JSON.stringify(payload), timeoutMs: Math.min(p.timeoutMs, 30_000), signal: req.signal });
-        steps.push({ name: "chat model", ok: r.ok, detail: r.ok ? `Model "${p.model}" answered` : describeStatus(r.status) });
+        steps.push({ name: "chat model", ok: r.ok, detail: r.ok ? `Model "${p.model}" answered` : `${describeStatus(r.status)}${await errorDetail(r, [p.apiKey]).then((d) => (d ? `: ${d}` : ""))}` });
         await r.body?.cancel().catch(() => undefined);
       } catch (e) {
         steps.push({ name: "chat model", ok: false, detail: e instanceof Error && e.name === "TimeoutError" ? "Timed out" : "Could not connect" });

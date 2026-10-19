@@ -63,6 +63,25 @@ export function describeStatus(status: number): string {
   return `unexpected response (HTTP ${status})`;
 }
 
+/** The provider's own explanation of a failed request (for example "model is overloaded"), short and with secrets removed. */
+export async function errorDetail(res: Response, secrets: string[] = []): Promise<string> {
+  let text = "";
+  try {
+    text = await res.text();
+  } catch {
+    return "";
+  }
+  let msg = text;
+  try {
+    const j = JSON.parse(text) as { error?: { message?: unknown } | string; message?: unknown };
+    const m = typeof j.error === "string" ? j.error : j.error?.message ?? j.message;
+    if (typeof m === "string") msg = m;
+  } catch {
+    /* not JSON: use the raw text */
+  }
+  return redact(msg.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200), secrets);
+}
+
 export const isRetryableStatus = (s: number) => s === 429 || s === 500 || s === 502 || s === 503 || s === 504;
 
 /**
@@ -151,14 +170,14 @@ export async function routeChat(providers: Provider[], messages: ChatMessage[], 
       }
 
       const status = res.status;
-      await res.body?.cancel().catch(() => undefined);
+      const detail = await errorDetail(res, [provider.apiKey]);
       breakerFail(provider.id, now());
       if (isRetryableStatus(status) && n < provider.maxRetries) {
         const retryAfter = Number(res.headers.get("retry-after"));
         await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, BACKOFF_CAP_MS) : backoffDelay(n, opts.random));
         continue;
       }
-      attempts.push({ providerId: provider.id, reason: describeStatus(status) });
+      attempts.push({ providerId: provider.id, reason: `${describeStatus(status)}${detail ? `: ${detail}` : ""}` });
       break;
     }
   }

@@ -7,7 +7,7 @@ import { PRESETS } from "../lib/presets";
 import { capabilitiesOf, toPublic } from "../lib/providers-core";
 import { redact } from "../lib/redact";
 import { RouterError, chatOnce, routeChat } from "../lib/router";
-import { describeStatus } from "../lib/router";
+import { describeStatus, errorDetail } from "../lib/router";
 import { describeNetError } from "../lib/net-errors";
 import { providerFetch } from "../lib/provider-http";
 import { validateBook } from "../lib/books-core";
@@ -108,7 +108,7 @@ async function testRoute(id: string, req: Request): Promise<Response> {
       const path = proto === "anthropic" ? "/messages" : proto === "gemini" ? `/models/${encodeURIComponent(p.model.replace(/^models\//, ""))}:generateContent` : "/chat/completions";
       const payload = proto === "anthropic" ? { model: p.model, max_tokens: 5, messages: [{ role: "user", content: "Reply with: ok" }] } : proto === "gemini" ? { contents: [{ role: "user", parts: [{ text: "Reply with: ok" }] }] } : { model: p.model, messages: [{ role: "user", content: "Reply with: ok" }], max_tokens: 5 };
       const r = await providerFetch(p, path, { method: "POST", body: JSON.stringify(payload), timeoutMs: Math.min(p.timeoutMs, 90_000), signal: req.signal, fetchImpl: providerFetchImpl });
-      steps.push({ name: "chat model", ok: r.ok, detail: r.ok ? `Model "${p.model}" answered` : describeStatus(r.status) });
+      steps.push({ name: "chat model", ok: r.ok, detail: r.ok ? `Model "${p.model}" answered` : `${describeStatus(r.status)}${await errorDetail(r, [p.apiKey]).then((d) => (d ? `: ${d}` : ""))}` });
     } catch (e) {
       steps.push({ name: "chat model", ok: false, detail: `Could not connect: ${redact(describeNetError(e), [p.apiKey])}` });
     }
