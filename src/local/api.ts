@@ -9,6 +9,8 @@ import { redact } from "../lib/redact";
 import { RouterError, chatOnce, routeChat } from "../lib/router";
 import { describeStatus, errorDetail } from "../lib/router";
 import { describeNetError } from "../lib/net-errors";
+import { fetchModelIds, ModelListError } from "../lib/model-list";
+import type { Provider } from "../lib/providers-core";
 import { providerFetch } from "../lib/provider-http";
 import { validateBook } from "../lib/books-core";
 import { validateProductVideo, validateSlideshow } from "../lib/video-core";
@@ -131,6 +133,29 @@ async function modelsRoute(id: string, req: Request): Promise<Response> {
   }
 }
 
+
+/** Models of a provider that is not saved yet (the form's URL + key), or of a saved one when the key is left empty. */
+async function previewModelsRoute(req: Request): Promise<Response> {
+  const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  const { value, errors } = validateProviderInput({ baseUrl: b.baseUrl, protocol: b.protocol, headers: b.headers, orgId: b.orgId, apiKey: b.apiKey || undefined }, { partial: true });
+  if (errors.length || !value.baseUrl) return json(400, { error: "Invalid provider", details: errors.length ? errors : ["baseUrl: is required"] });
+  let apiKey = value.apiKey ?? "";
+  let headers = value.headers;
+  if (!apiKey && typeof b.providerId === "string") {
+    const saved = (await loadAllProviders()).providers.find((p) => p.id === b.providerId);
+    if (saved) {
+      apiKey = saved.apiKey;
+      headers = { ...(saved.headers ?? {}), ...(headers ?? {}) };
+    }
+  }
+  const p: Provider = { id: "preview", name: "preview", protocol: value.protocol ?? "openai", baseUrl: value.baseUrl, apiKey, model: "x", imageModel: "", videoModel: "", priority: 1, enabled: true, timeoutMs: 25_000, maxRetries: 0, supportsVision: false, noAttachments: false, ...(headers ? { headers } : {}), ...(value.orgId ? { orgId: value.orgId } : {}) };
+  try {
+    return json(200, { models: await fetchModelIds(p, { signal: req.signal, fetchImpl: providerFetchImpl, describe: (e) => redact(describeNetError(e), [apiKey]) }) });
+  } catch (e) {
+    return json(502, { error: e instanceof ModelListError ? e.message : `Could not list models: ${redact(describeNetError(e), [apiKey])}` });
+  }
+}
+
 /** Text of an image through the user's vision provider (replaces server-side OCR). */
 async function imageText(id: string, req: Request): Promise<{ text: string; truncated: boolean; method: string }> {
   const { asset, data } = await readAssetData(id);
@@ -168,6 +193,7 @@ export async function handleApi(req: Request): Promise<Response> {
       return json(200, { ok: true });
     }
     if ((g = path.match(/^\/api\/providers\/([^/]+)\/test$/)) && m === "POST") return testRoute(decodeURIComponent(g[1]), req);
+    if (path === "/api/models" && m === "POST") return previewModelsRoute(req);
     if ((g = path.match(/^\/api\/providers\/([^/]+)\/models$/)) && m === "GET") return modelsRoute(decodeURIComponent(g[1]), req);
     if ((g = path.match(/^\/api\/providers\/([^/]+)$/))) {
       const id = decodeURIComponent(g[1]);

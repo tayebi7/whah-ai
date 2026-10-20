@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { classifyModels, suggest, type ModelGroups } from "../lib/model-classify";
 import { PRESETS } from "../lib/presets";
 import { describeError, type PubProvider } from "./api";
 import { useApp } from "./app";
@@ -85,6 +86,7 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>([]);
+  const [groups, setGroups] = useState<ModelGroups | null>(null);
   const [loadingModels, setLoadingModels] = useState(false);
   const [tests, setTests] = useState<Record<string, TestResult | "running">>({});
   const [confirmDel, setConfirmDel] = useState<PubProvider | null>(null);
@@ -113,13 +115,63 @@ export default function Settings() {
     setForm((f) => (f ? { ...f, preset: key, baseUrl: p?.baseUrl ?? f.baseUrl, protocol: p?.protocol ?? f.protocol, name: f.name || (p && p.key !== "custom" ? p.name : f.name) } : f));
   }
 
+  /** Asks the provider for its models (works before saving) and fills every EMPTY model field with a sensible pick. */
+  async function discover(f: Form): Promise<{ form: Form; count: number }> {
+    let headers: unknown;
+    if (f.headers.trim()) {
+      try {
+        headers = JSON.parse(f.headers);
+      } catch {
+        throw new Error('Custom headers must be valid JSON, for example {"X-Org": "abc"}');
+      }
+    }
+    const d = await api.post<{ models: string[] }>("/api/models", { baseUrl: f.baseUrl.trim(), protocol: f.protocol, apiKey: f.apiKey.trim() || undefined, headers, orgId: f.orgId.trim() || undefined, providerId: f.editingId ?? undefined });
+    const g = classifyModels(d.models);
+    const pick = suggest(g);
+    setModels(d.models);
+    setGroups(g);
+    const next: Form = { ...f };
+    if (!next.model.trim() && pick.model) {
+      next.model = pick.model;
+      if (pick.vision) next.supportsVision = true;
+    }
+    if (!next.imageModel.trim() && pick.imageModel && f.protocol === "openai") next.imageModel = pick.imageModel;
+    if (!next.videoModel.trim() && pick.videoModel) next.videoModel = pick.videoModel;
+    return { form: next, count: d.models.length };
+  }
+
+  async function fetchModels(silent = false) {
+    if (!form || !form.baseUrl.trim()) return;
+    setLoadingModels(true);
+    if (!silent) setFormErr(null);
+    try {
+      const r = await discover(form);
+      setForm(r.form);
+      if (!silent) toast(t("modelsFound", { n: r.count }));
+    } catch (e) {
+      if (!silent) setFormErr(describeError(e));
+    } finally {
+      setLoadingModels(false);
+    }
+  }
+
   async function save() {
     if (!form) return;
     setSaving(true);
     setFormErr(null);
     try {
-      const body = toPayload(form);
-      if (form.editingId) await api.put(`/api/providers/${form.editingId}`, body);
+      let f = form;
+      // Nothing typed for the models: look them up and fill them in, so only URL + key are needed.
+      if (!f.model.trim() && !f.imageModel.trim() && !f.videoModel.trim() && f.baseUrl.trim()) {
+        try {
+          f = (await discover(f)).form;
+          setForm(f);
+        } catch (e) {
+          throw new Error(`${t("needModel")} (${describeError(e)})`);
+        }
+      }
+      const body = toPayload(f);
+      if (f.editingId) await api.put(`/api/providers/${f.editingId}`, body);
       else await api.post("/api/providers", body);
       await refreshProviders();
       toast(t("saved"));
@@ -128,21 +180,6 @@ export default function Settings() {
       setFormErr(describeError(e));
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function fetchModels() {
-    if (!form?.editingId) return;
-    setLoadingModels(true);
-    setFormErr(null);
-    try {
-      const d = await api.get<{ models: string[] }>(`/api/providers/${form.editingId}/models`);
-      setModels(d.models);
-      toast(t("modelsFound", { n: d.models.length }));
-    } catch (e) {
-      setFormErr(describeError(e));
-    } finally {
-      setLoadingModels(false);
     }
   }
 
@@ -201,7 +238,7 @@ export default function Settings() {
           <h2>{t("providersTitle")}</h2>
           <p className="muted">{t("providersHelp")}</p>
         </div>
-        <button className="btn primary" onClick={() => { setForm(blank()); setModels([]); setFormErr(null); }}>+ {t("addProvider")}</button>
+        <button className="btn primary" onClick={() => { setForm(blank()); setModels([]); setGroups(null); setFormErr(null); }}>+ {t("addProvider")}</button>
       </header>
 
       <div className="card">
@@ -285,14 +322,14 @@ export default function Settings() {
                 <button className="btn sm" onClick={() => void runTest(p.id)} disabled={test === "running"}>{test === "running" ? t("testing") : t("test")}</button>
                 {isStored ? (
                   <>
-                    <button className="btn sm" onClick={() => { setForm(fromProvider(p, false)); setModels([]); setFormErr(null); }}>{t("edit")}</button>
+                    <button className="btn sm" onClick={() => { setForm(fromProvider(p, false)); setModels([]); setGroups(null); setFormErr(null); }}>{t("edit")}</button>
                     <button className="btn sm" onClick={() => void toggle(p)}>{p.enabled ? t("disable") : t("enable")}</button>
                     <button className="btn sm" aria-label={t("moveUp")} disabled={si <= 0} onClick={() => void move(p.id, -1)}>↑</button>
                     <button className="btn sm" aria-label={t("moveDown")} disabled={si < 0 || si >= stored.length - 1} onClick={() => void move(p.id, 1)}>↓</button>
                     <button className="btn sm danger-outline" onClick={() => setConfirmDel(p)}>{t("delete")}</button>
                   </>
                 ) : (
-                  <button className="btn sm" onClick={() => { setForm(fromProvider(p, true)); setModels([]); setFormErr(null); }}>{t("duplicate")}</button>
+                  <button className="btn sm" onClick={() => { setForm(fromProvider(p, true)); setModels([]); setGroups(null); setFormErr(null); }}>{t("duplicate")}</button>
                 )}
               </div>
               {test && test !== "running" && (
@@ -342,7 +379,7 @@ export default function Settings() {
               <input required value={form.baseUrl} onChange={(e) => set("baseUrl", e.target.value)} placeholder="https://api.example.com/v1" dir="ltr" inputMode="url" />
             </Field>
             <Field label={t("fKey")} hint={form.editingId ? t("fKeyKeep") : undefined}>
-              <input type="password" value={form.apiKey} onChange={(e) => set("apiKey", e.target.value)} autoComplete="new-password" spellCheck={false} dir="ltr" />
+              <input type="password" value={form.apiKey} onChange={(e) => set("apiKey", e.target.value)} onBlur={() => { if (!form.editingId && form.apiKey.trim() && form.baseUrl.trim() && models.length === 0) void fetchModels(true); }} autoComplete="new-password" spellCheck={false} dir="ltr" />
             </Field>
             {form.editingId && (
               <label className="check">
@@ -353,19 +390,22 @@ export default function Settings() {
 
             <div className="span-all row between wrap">
               <strong>{t("fModels")}</strong>
-              <button type="button" className="btn sm" disabled={!form.editingId || loadingModels} onClick={() => void fetchModels()} title={form.editingId ? "" : t("fetchAfterSave")}>
+              <button type="button" className="btn sm" disabled={!form.baseUrl.trim() || loadingModels} onClick={() => void fetchModels()}>
                 {loadingModels ? t("loading") : t("fetchModels")}
               </button>
             </div>
-            <datalist id="model-options">{models.map((m) => <option key={m} value={m} />)}</datalist>
+            {groups && <small className="span-all muted">💬 {groups.chat.length} · 🖼 {groups.image.length} · 🎬 {groups.video.length}</small>}
+            <datalist id="model-options">{(groups ? groups.chat : models).map((m) => <option key={m} value={m} />)}</datalist>
+            <datalist id="image-options">{(groups ? [...groups.image, ...groups.chat, ...groups.other] : models).map((m) => <option key={m} value={m} />)}</datalist>
+            <datalist id="video-options">{(groups ? [...groups.video, ...groups.chat, ...groups.other] : models).map((m) => <option key={m} value={m} />)}</datalist>
             <Field label={`💬 ${t("fModel")}`}>
               <input list="model-options" value={form.model} onChange={(e) => set("model", e.target.value)} dir="ltr" placeholder="gpt-4o-mini" />
             </Field>
             <Field label={`🖼 ${t("fImageModel")}`}>
-              <input list="model-options" value={form.imageModel} onChange={(e) => set("imageModel", e.target.value)} dir="ltr" placeholder="gpt-image-1" />
+              <input list="image-options" value={form.imageModel} onChange={(e) => set("imageModel", e.target.value)} dir="ltr" placeholder="gpt-image-1" />
             </Field>
             <Field label={`🎬 ${t("fVideoModel")}`}>
-              <input list="model-options" value={form.videoModel} onChange={(e) => set("videoModel", e.target.value)} dir="ltr" />
+              <input list="video-options" value={form.videoModel} onChange={(e) => set("videoModel", e.target.value)} dir="ltr" />
             </Field>
             <div className="span-all row wrap">
               <label className="check"><input type="checkbox" checked={form.supportsVision} onChange={(e) => set("supportsVision", e.target.checked)} />{t("fVision")}</label>
