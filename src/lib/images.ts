@@ -1,3 +1,4 @@
+import { buildImageRequest, imageRefusalText, imageStyle, parseImageResponse } from "./image-requests";
 import { saveAsset, type Asset } from "./assets";
 import { maxGeneratedBytes } from "./config";
 import { providerFetch, TimeoutError } from "./provider-http";
@@ -55,27 +56,29 @@ export async function generateImages(providers: Provider[], r: ImageRequest): Pr
       continue;
     }
     try {
-      const body = JSON.stringify({ model: p.imageModel, prompt: r.prompt, n: r.n ?? 1, ...(r.size && r.size !== "auto" ? { size: r.size } : {}) });
-      const res = await providerFetch(p, "/images/generations", { method: "POST", body, timeoutMs: Math.max(p.timeoutMs, 120_000), signal: r.signal, fetchImpl: r.fetchImpl });
+      const style = imageStyle(p);
+      const req = buildImageRequest(p, r.prompt, r.n ?? 1, r.size);
+      const res = await providerFetch(p, req.path, { method: "POST", body: req.body, timeoutMs: Math.max(p.timeoutMs, 120_000), signal: r.signal, fetchImpl: r.fetchImpl });
       if (!res.ok) {
         breakerFail(p.id, Date.now());
         const detail = redact((await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 140), [p.apiKey]);
         attempts.push({ providerId: p.id, reason: `${describeStatus(res.status)}${detail ? `: ${detail}` : ""}` });
         continue;
       }
-      const data = ((await res.json().catch(() => ({}))) as { data?: { b64_json?: string; url?: string }[] }).data ?? [];
+      const json = await res.json().catch(() => ({}));
+      const data = parseImageResponse(style, json);
       const assets: Asset[] = [];
       let i = 0;
       for (const item of data.slice(0, 8)) {
         i++;
-        const buf = item.b64_json ? Buffer.from(item.b64_json, "base64") : item.url ? (await downloadRemote(item.url, { maxBytes: maxGeneratedBytes(), signal: r.signal, resolve: r.resolve, fetchImpl: r.fetchImpl })).data : null;
+        const buf = item.b64 ? Buffer.from(item.b64, "base64") : item.url ? (await downloadRemote(item.url, { maxBytes: maxGeneratedBytes(), signal: r.signal, resolve: r.resolve, fetchImpl: r.fetchImpl })).data : null;
         const ext = buf ? sniff(buf) : null;
         if (!buf || !ext) continue;
         assets.push(await saveAsset({ name: `image-${Date.now().toString(36)}-${i}.${ext}`, data: buf, origin: "generated" }));
       }
       if (assets.length === 0) {
         breakerFail(p.id, Date.now());
-        attempts.push({ providerId: p.id, reason: "the provider returned no valid images" });
+        attempts.push({ providerId: p.id, reason: `the provider returned no valid images${imageRefusalText(json) ? `: ${redact(imageRefusalText(json), [p.apiKey])}` : ""}` });
         continue;
       }
       breakerOk(p.id);

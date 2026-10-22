@@ -1,3 +1,4 @@
+import { runVeo } from "./veo";
 import { type Asset, readAssetData, saveAsset } from "./assets";
 import { maxGeneratedBytes } from "./config";
 import { providerFetch, TimeoutError } from "./provider-http";
@@ -33,6 +34,25 @@ const isVideo = (b: Buffer) => b.subarray(4, 8).toString("latin1") === "ftyp" ||
  */
 export async function generateProviderVideo(p: Provider, input: ProviderVideoInput, ctx: ProviderVideoContext): Promise<Asset> {
   const api = p.videoApi;
+  if (p.protocol === "gemini" && p.videoModel) {
+    const sl = ctx.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    const data = await runVeo(p, input.prompt, input.aspect, {
+      call: (path, body) => providerFetch(p, path, { method: body ? "POST" : "GET", body, timeoutMs: Math.min(p.timeoutMs, 60_000), signal: ctx.signal, fetchImpl: ctx.fetchImpl }),
+      download: async (uri) => {
+        const u = new URL(uri);
+        if (!/(^|\.)googleapis\.com$/.test(u.hostname)) throw new Error("Unexpected video download host");
+        const f2: typeof fetch = ctx.fetchImpl ?? fetch;
+        const res = await f2(uri, { headers: { "x-goog-api-key": p.apiKey }, redirect: "follow", signal: ctx.signal });
+        if (!res.ok) throw new Error(`Video download failed (HTTP ${res.status})`);
+        return new Uint8Array(await res.arrayBuffer());
+      },
+      sleep: sl,
+      setProgress: ctx.setProgress,
+      aborted: () => !!ctx.signal?.aborted,
+    });
+    if (!isVideo(Buffer.from(data))) throw new Error("The downloaded result is not a valid MP4/WebM video");
+    return saveAsset({ name: `video-${Date.now().toString(36)}.mp4`, data: Buffer.from(data), origin: "generated" });
+  }
   if (!p.videoModel || !api) throw new Error("This provider has no video model/API configured");
   const sleep = ctx.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 

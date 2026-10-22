@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { createApi, type Api, type Asset, type PubProvider } from "./api";
 import { dict, type Lang } from "./i18n";
 
-export type Tab = "chat" | "studio" | "docs" | "books" | "settings";
+export type Tab = "chat" | "studio" | "docs" | "books" | "skills" | "connectors" | "settings";
 
 type Ctx = {
   lang: Lang;

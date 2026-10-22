@@ -54,6 +54,8 @@ export type ProductVideoInput = {
   generateImages: number;
   aspect: Aspect;
   secondsPerSlide: number;
+  /** Internal: the text is a free scene description (auto storyboard), not a product. */
+  scene?: boolean;
 };
 
 export function validateProductVideo(b: unknown): { value?: ProductVideoInput; errors: string[] } {

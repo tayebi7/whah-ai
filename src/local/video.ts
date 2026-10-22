@@ -7,7 +7,8 @@ import { type Asset, readAssetData, saveAsset, toBase64 } from "./assets";
 import { generateImages, downloadBytes } from "./images";
 import type { JobContext } from "./jobs";
 import { FONT } from "./pdf";
-import { providerFetchImpl } from "./net";
+import { netFetch, providerFetchImpl } from "./net";
+import { runVeo } from "../lib/veo";
 
 const MIME_CANDIDATES = ["video/mp4;codecs=avc1", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"];
 export const pickVideoMime = (): string | undefined => (typeof MediaRecorder === "undefined" ? undefined : MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m)));
@@ -105,7 +106,7 @@ export async function runProductVideo(input: ProductVideoInput, providers: Provi
   if (input.generateImages > 0) {
     ctx.setProgress(5, "Generating product images");
     try {
-      const prompt = `Professional, well-lit studio product photo of: ${input.productName}. ${input.description}`.slice(0, 1500);
+      const prompt = (input.scene ? `${input.productName}. ${input.description} Cinematic, highly detailed, no text.` : `Professional, well-lit studio product photo of: ${input.productName}. ${input.description}`).slice(0, 1500);
       const r = await generateImages(providers, { prompt, n: input.generateImages, size: input.aspect === "16:9" ? "1536x1024" : input.aspect === "9:16" ? "1024x1536" : "1024x1024", signal: ctx.signal });
       for (const a of r.assets) {
         made.push(a);
@@ -160,8 +161,24 @@ const isVideo = (b: Uint8Array) => (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0
 /** Submission is never retried automatically (it may be billed); polling tolerates brief errors. Cancelling stops OUR polling only. */
 export async function generateProviderVideo(p: Provider, input: ProviderVideoInput, ctx: { setProgress: (p: number, s: string) => void; signal?: AbortSignal; sleep?: (ms: number) => Promise<void> }): Promise<Asset> {
   const api = p.videoApi;
-  if (!p.videoModel || !api) throw new Error("This provider has no video model/API configured");
   const wait = ctx.sleep ?? sleep;
+  if (p.protocol === "gemini" && p.videoModel) {
+    const data = await runVeo(p, input.prompt, input.aspect, {
+      call: (path, body) => providerFetch(p, path, { method: body ? "POST" : "GET", body, timeoutMs: Math.min(p.timeoutMs, 60_000), signal: ctx.signal, fetchImpl: providerFetchImpl }),
+      download: async (uri) => {
+        if (!/^https:\/\/[^/]*googleapis\.com\//.test(uri)) throw new Error("Unexpected video download host");
+        const res = await netFetch(uri, { headers: { "x-goog-api-key": p.apiKey }, signal: ctx.signal }, { binary: true });
+        if (!res.ok) throw new Error(`Video download failed (HTTP ${res.status})`);
+        return new Uint8Array(await res.arrayBuffer());
+      },
+      sleep: wait,
+      setProgress: ctx.setProgress,
+      aborted: () => !!ctx.signal?.aborted,
+    });
+    if (!isVideo(data)) throw new Error("The downloaded result is not a valid MP4/WebM video");
+    return saveAsset({ name: `video-${Date.now().toString(36)}.mp4`, data, origin: "generated" });
+  }
+  if (!p.videoModel || !api) throw new Error("This provider has no video model/API configured");
   const body: Record<string, unknown> = { ...(api.extraBody ?? {}), model: p.videoModel, prompt: input.prompt };
   if (input.seconds) body.duration = input.seconds;
   if (input.aspect) body.aspect_ratio = input.aspect;

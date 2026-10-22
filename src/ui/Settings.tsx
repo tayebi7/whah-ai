@@ -135,7 +135,7 @@ export default function Settings() {
       next.model = pick.model;
       if (pick.vision) next.supportsVision = true;
     }
-    if (!next.imageModel.trim() && pick.imageModel && f.protocol === "openai") next.imageModel = pick.imageModel;
+    if (!next.imageModel.trim() && pick.imageModel && f.protocol !== "anthropic") next.imageModel = pick.imageModel;
     if (!next.videoModel.trim() && pick.videoModel) next.videoModel = pick.videoModel;
     return { form: next, count: d.models.length };
   }

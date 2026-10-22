@@ -375,7 +375,35 @@ export async function handleApi(req: Request): Promise<Response> {
         const input = { prompt: b.prompt.trim(), imageAssetId: typeof b.imageAssetId === "string" ? b.imageAssetId : undefined, seconds, aspect: typeof b.aspect === "string" && ["16:9", "9:16", "1:1"].includes(b.aspect) ? b.aspect : undefined };
         return json(202, { job: await startJob("video", `${p.name}: ${input.prompt.slice(0, 60)}`, async (ctx) => [(await generateProviderVideo(p, input, ctx)).id]) });
       }
-      return json(400, { error: 'mode must be "slideshow", "product" or "provider"' });
+      if (mode === "auto") {
+        // Gemini-style "just describe it": real video model if one is configured, otherwise an AI storyboard video.
+        if (typeof b.prompt !== "string" || !b.prompt.trim() || b.prompt.length > 4000) return json(400, { error: "prompt is required (max 4000 characters)" });
+        const prompt = b.prompt.trim();
+        const aspect = typeof b.aspect === "string" && ["16:9", "9:16", "1:1"].includes(b.aspect) ? (b.aspect as "16:9" | "9:16" | "1:1") : "16:9";
+        const language = b.language === "en" || b.language === "fr" ? b.language : "ar";
+        const { providers } = await loadAllProviders();
+        const videoPs = providers.filter((x) => x.enabled && capabilitiesOf(x).video);
+        const canStoryboard = canRecordVideo() && providers.some((x) => x.enabled && capabilitiesOf(x).image);
+        if (videoPs.length === 0 && !canStoryboard) return json(400, { error: "No video model is configured and no image model is available for a storyboard video. Add one in Settings." });
+        return json(202, {
+          job: await startJob("video", prompt.slice(0, 60), async (ctx) => {
+            const problems: string[] = [];
+            for (const p of videoPs) {
+              try {
+                return [(await generateProviderVideo(p, { prompt, aspect }, ctx)).id];
+              } catch (e) {
+                if (ctx.signal.aborted) throw e;
+                problems.push(`${p.name}: ${(e as Error).message}`);
+                ctx.warn(`${p.name}: ${(e as Error).message}`);
+              }
+            }
+            if (!canStoryboard) throw new Error(problems.join(" | ") || "Video generation failed");
+            if (problems.length) ctx.warn("Falling back to an AI storyboard video");
+            return runProductVideo({ productName: prompt.slice(0, 120), description: prompt.slice(0, 2000), language, photoAssetIds: [], generateImages: 4, aspect, secondsPerSlide: 3, scene: true }, providers, ctx);
+          }),
+        });
+      }
+      return json(400, { error: 'mode must be "slideshow", "product", "provider" or "auto"' });
     }
     return json(404, { error: `Not found: ${m} ${path}` });
   } catch (e) {

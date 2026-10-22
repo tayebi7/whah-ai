@@ -15,7 +15,7 @@ export async function runProductVideo(input: ProductVideoInput, providers: Provi
   if (input.generateImages > 0) {
     ctx.setProgress(5, "Generating product images");
     try {
-      const prompt = `Professional, well-lit studio product photo of: ${input.productName}. ${input.description}`.slice(0, 1500);
+      const prompt = (input.scene ? `${input.productName}. ${input.description} Cinematic, highly detailed, no text.` : `Professional, well-lit studio product photo of: ${input.productName}. ${input.description}`).slice(0, 1500);
       const r = await generateImages(providers, { prompt, n: input.generateImages, size: input.aspect === "16:9" ? "1536x1024" : input.aspect === "9:16" ? "1024x1536" : "1024x1024", signal: ctx.signal });
       for (const a of r.assets) {
         made.push(a);

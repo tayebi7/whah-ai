@@ -1,3 +1,4 @@
+import { buildImageRequest, imageRefusalText, imageStyle, parseImageResponse } from "../lib/image-requests";
 import { providerFetch, TimeoutError } from "../lib/provider-http";
 import { capabilitiesOf, type Provider } from "../lib/providers-core";
 import { describeNetError } from "../lib/net-errors";
@@ -45,22 +46,24 @@ export async function generateImages(providers: Provider[], r: ImageRequest): Pr
       continue;
     }
     try {
-      const body = JSON.stringify({ model: p.imageModel, prompt: r.prompt, n: r.n ?? 1, ...(r.size && r.size !== "auto" ? { size: r.size } : {}) });
-      const res = await providerFetch(p, "/images/generations", { method: "POST", body, timeoutMs: Math.max(p.timeoutMs, 120_000), signal: r.signal, fetchImpl: providerFetchImpl });
+      const style = imageStyle(p);
+      const req = buildImageRequest(p, r.prompt, r.n ?? 1, r.size);
+      const res = await providerFetch(p, req.path, { method: "POST", body: req.body, timeoutMs: Math.max(p.timeoutMs, 120_000), signal: r.signal, fetchImpl: providerFetchImpl });
       if (!res.ok) {
         breakerFail(p.id, Date.now());
         const detail = redact((await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 140), [p.apiKey]);
         attempts.push({ providerId: p.id, reason: `${describeStatus(res.status)}${detail ? `: ${detail}` : ""}` });
         continue;
       }
-      const data = ((await res.json().catch(() => ({}))) as { data?: { b64_json?: string; url?: string }[] }).data ?? [];
+      const json = await res.json().catch(() => ({}));
+      const data = parseImageResponse(style, json);
       const assets: Asset[] = [];
       let i = 0;
       for (const item of data.slice(0, 8)) {
         i++;
         let buf: Uint8Array | null = null;
         try {
-          buf = item.b64_json ? fromBase64(item.b64_json) : item.url ? await downloadBytes(item.url, 50 * 1024 * 1024, r.signal) : null;
+          buf = item.b64 ? fromBase64(item.b64) : item.url ? await downloadBytes(item.url, 50 * 1024 * 1024, r.signal) : null;
         } catch {
           buf = null;
         }
@@ -70,7 +73,7 @@ export async function generateImages(providers: Provider[], r: ImageRequest): Pr
       }
       if (assets.length === 0) {
         breakerFail(p.id, Date.now());
-        attempts.push({ providerId: p.id, reason: "the provider returned no valid images" });
+        attempts.push({ providerId: p.id, reason: `the provider returned no valid images${imageRefusalText(json) ? `: ${redact(imageRefusalText(json), [p.apiKey])}` : ""}` });
         continue;
       }
       breakerOk(p.id);

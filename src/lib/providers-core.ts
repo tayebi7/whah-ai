@@ -46,8 +46,8 @@ export type Capabilities = { chat: boolean; vision: boolean; image: boolean; vid
 export const capabilitiesOf = (p: Provider): Capabilities => ({
   chat: !!p.model,
   vision: !!p.model && p.supportsVision,
-  image: !!p.imageModel && (p.protocol ?? "openai") === "openai",
-  video: !!p.videoModel && !!p.videoApi,
+  image: !!p.imageModel && (p.protocol ?? "openai") !== "anthropic",
+  video: !!p.videoModel && (!!p.videoApi || p.protocol === "gemini"),
 });
 
 export type PublicProvider = Omit<Provider, "apiKey" | "headers" | "videoApi"> & {
