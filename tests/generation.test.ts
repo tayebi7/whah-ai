@@ -72,3 +72,11 @@ describe("veo", () => {
     await assert.rejects(runVeo(mk({ protocol: "gemini", videoModel: "v", apiKey: "k-secret-123" }), "x", undefined, io), (e: Error) => /HTTP 400/.test(e.message) && !e.message.includes("k-secret-123"));
   });
 });
+
+import { bestOf } from "../src/lib/model-classify";
+describe("model suggestion", () => {
+  it("prefers the newest version of a family", () => {
+    assert.equal(bestOf(["models/gemini-2.5-flash", "models/gemini-3.8-flash", "models/gemini-2.0-flash"]), "models/gemini-3.8-flash");
+    assert.equal(bestOf(["gpt-4o-mini", "gpt-4o"]), "gpt-4o-mini");
+  });
+});

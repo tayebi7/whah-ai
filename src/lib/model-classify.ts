@@ -24,7 +24,12 @@ const score = (id: string) => {
   return (i < 0 ? 99 : i) + (UNSTABLE.test(id) ? 0.5 : 0);
 };
 /** Prefers fast, current, stable names: lowest rank, then the shortest (the alias rather than a dated copy). */
-export const bestOf = (ids: string[]): string => [...ids].sort((a, b) => score(a) - score(b) || a.length - b.length || a.localeCompare(b))[0] ?? "";
+const version = (id: string) => {
+  const m = /(\d+(?:\.\d+)?)/.exec(id.replace(/^models\//, ""));
+  return m ? Number(m[1]) : 0;
+};
+/** Within the same family it takes the NEWEST version (old ones are retired for new accounts), then the shortest alias. */
+export const bestOf = (ids: string[]): string => [...ids].sort((a, b) => Math.floor(score(a)) - Math.floor(score(b)) || version(b) - version(a) || score(a) - score(b) || a.length - b.length || a.localeCompare(b))[0] ?? "";
 
 const VISION = /(gpt-4o|gpt-4\.1|gpt-5|gemini|claude|vision|(^|[-_/])vl([-_/]|$)|llava|pixtral|minicpm-v|gemma-?3)/i;
 export const looksVision = (id: string) => VISION.test(id);
