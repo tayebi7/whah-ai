@@ -58,10 +58,24 @@ export async function netFetch(input: RequestInfo | URL, init: RequestInit = {},
       data = init.body;
     }
   }
-  const res = await race(
-    native.request({ url, method, headers, ...(data !== undefined ? { data } : {}), responseType: o.binary ? "blob" : "text", connectTimeout: 30_000, readTimeout: o.timeoutMs ?? 120_000 }),
-    init.signal,
-  );
+  let res: Awaited<ReturnType<NativeHttp["request"]>>;
+  try {
+    res = await race(
+      native.request({ url, method, headers, ...(data !== undefined ? { data } : {}), responseType: o.binary ? "blob" : "text", connectTimeout: 30_000, readTimeout: o.timeoutMs ?? 120_000 }),
+      init.signal,
+    );
+  } catch (e) {
+    // Android's own resolver sometimes fails ("Unable to resolve host") where the WebView's (Chromium) resolver works.
+    // The request was never sent, so trying the WebView is safe; it works for providers that allow browser (CORS) calls.
+    if (!init.signal?.aborted && /unable to resolve host|unknownhost|no address associated/i.test(String((e as Error)?.message ?? e))) {
+      try {
+        return await baseFetch(input, init);
+      } catch {
+        /* report the original error */
+      }
+    }
+    throw e;
+  }
   const outHeaders = new Headers();
   for (const [k, v] of Object.entries(res.headers ?? {})) {
     try {
