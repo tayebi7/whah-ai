@@ -90,8 +90,8 @@ describe("more protocols and key hygiene", () => {
   it("cleans keys pasted with invisible marks and rejects non-ASCII", () => {
     assert.equal(cleanKey(" ‏sk-or-v1-abc‎\n"), "sk-or-v1-abc");
     assert.equal(cleanKey("Bearer sk-x1"), "sk-x1");
-    assert.equal(validateProviderInput({ name: "a", baseUrl: "https://a.example.com", apiKey: "‏ sk-or-v1-abc ", model: "m" }, { local: false }).value?.apiKey, "sk-or-v1-abc");
-    assert.ok(validateProviderInput({ name: "a", baseUrl: "https://a.example.com", apiKey: "مفتاح" }, { local: false }).errors.some((e) => /apiKey/.test(e)));
+    assert.equal(validateProviderInput({ name: "a", baseUrl: "https://a.example.com", apiKey: "‏ sk-or-v1-abc ", model: "m" }, { allowLocal: false }).value?.apiKey, "sk-or-v1-abc");
+    assert.ok(validateProviderInput({ name: "a", baseUrl: "https://a.example.com", apiKey: "مفتاح" }, { allowLocal: false }).errors.some((e) => /apiKey/.test(e)));
   });
   it("fingerprint never reveals the whole key", () => {
     const f = keyFingerprint("sk-or-v1-0123456789abcdef");
