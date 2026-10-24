@@ -3,7 +3,7 @@ import { providerFetch, TimeoutError } from "../lib/provider-http";
 import { capabilitiesOf, type Provider } from "../lib/providers-core";
 import { describeNetError } from "../lib/net-errors";
 import { redact } from "../lib/redact";
-import { breakerFail, breakerOk, breakerOpen, describeStatus, type Attempt } from "../lib/router";
+import { breakerFail, breakerOk, breakerOpen, describeStatus, keyFingerprint, type Attempt } from "../lib/router";
 import { saveAsset, fromBase64, sniffImage, type Asset } from "./assets";
 import { netFetch, providerFetchImpl } from "./net";
 
@@ -52,7 +52,7 @@ export async function generateImages(providers: Provider[], r: ImageRequest): Pr
       if (!res.ok) {
         breakerFail(p.id, Date.now());
         const detail = redact((await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 140), [p.apiKey]);
-        attempts.push({ providerId: p.id, reason: `${describeStatus(res.status)}${detail ? `: ${detail}` : ""}` });
+        attempts.push({ providerId: p.id, reason: `${describeStatus(res.status)}${detail ? `: ${detail}` : ""}${res.status === 401 || res.status === 403 ? ` [${keyFingerprint(p.apiKey)}]` : ""}` });
         continue;
       }
       const json = await res.json().catch(() => ({}));

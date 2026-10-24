@@ -5,7 +5,7 @@ import { providerFetch, TimeoutError } from "./provider-http";
 import { capabilitiesOf, type Provider } from "./providers";
 import { redact } from "./redact";
 import { downloadRemote } from "./remote";
-import { breakerFail, breakerOk, breakerOpen, describeStatus, type Attempt } from "./router";
+import { breakerFail, breakerOk, breakerOpen, describeStatus, keyFingerprint, type Attempt } from "./router";
 
 export class ImageError extends Error {
   constructor(
@@ -62,7 +62,7 @@ export async function generateImages(providers: Provider[], r: ImageRequest): Pr
       if (!res.ok) {
         breakerFail(p.id, Date.now());
         const detail = redact((await res.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 140), [p.apiKey]);
-        attempts.push({ providerId: p.id, reason: `${describeStatus(res.status)}${detail ? `: ${detail}` : ""}` });
+        attempts.push({ providerId: p.id, reason: `${describeStatus(res.status)}${detail ? `: ${detail}` : ""}${res.status === 401 || res.status === 403 ? ` [${keyFingerprint(p.apiKey)}]` : ""}` });
         continue;
       }
       const json = await res.json().catch(() => ({}));
