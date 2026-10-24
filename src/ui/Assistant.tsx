@@ -227,6 +227,7 @@ export default function Assistant({ onMenu }: { onMenu: () => void }) {
                 ) : it.kind === "error" ? (
                   <>
                     <ErrorBox message={it.text ?? ""} onRetry={it.retry ? () => retryLast(it) : undefined} />
+                    {/resolve host|could not find this server|unknownhost/i.test(it.text ?? "") && <div className="warn-line" data-testid="dns-help">{t("a_dnsHelp")}</div>}
                     {it.retry && /Settings|الإعدادات|Réglages/i.test(it.text ?? "") && <button className="btn sm" onClick={() => go("settings")}>{t("openSettings")}</button>}
                   </>
                 ) : (
