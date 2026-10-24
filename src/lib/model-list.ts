@@ -1,4 +1,4 @@
-import { providerFetch } from "./provider-http";
+import { modelsPath, providerFetch } from "./provider-http";
 import type { Provider } from "./providers-core";
 
 /** Model ids from the different shapes providers use for GET /models. */
@@ -16,9 +16,11 @@ export class ModelListError extends Error {}
 
 /** Asks a provider (saved or not) which models it offers. Throws ModelListError with a readable reason. */
 export async function fetchModelIds(p: Provider, o: { signal?: AbortSignal; fetchImpl?: typeof fetch; describe: (e: unknown) => string }): Promise<string[]> {
+  const path = modelsPath(p);
+  if (!path) throw new ModelListError("This provider type has no model list: type the deployment/model name yourself");
   let res: Response;
   try {
-    res = await providerFetch(p, (p.protocol ?? "openai") === "gemini" ? "/models?pageSize=1000" : "/models", { timeoutMs: 25_000, signal: o.signal, fetchImpl: o.fetchImpl });
+    res = await providerFetch(p, path, { timeoutMs: 25_000, signal: o.signal, fetchImpl: o.fetchImpl });
   } catch (e) {
     throw new ModelListError(`Could not reach the provider: ${o.describe(e)}`);
   }

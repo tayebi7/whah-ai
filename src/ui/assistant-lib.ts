@@ -57,7 +57,7 @@ export async function enhancePrompt(api: Api, kind: "image" | "video", prompt: s
   if (prompt.length > 400) return prompt;
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 25_000);
+    const timer = setTimeout(() => ctrl.abort(), 12_000);
     signal?.addEventListener("abort", () => ctrl.abort(), { once: true });
     try {
       const r = await streamChat(

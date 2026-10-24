@@ -11,7 +11,8 @@ import { describeStatus, errorDetail } from "../lib/router";
 import { describeNetError } from "../lib/net-errors";
 import { fetchModelIds, ModelListError } from "../lib/model-list";
 import type { Provider } from "../lib/providers-core";
-import { providerFetch } from "../lib/provider-http";
+import { modelsPath, providerFetch } from "../lib/provider-http";
+import { testProvider } from "../lib/provider-test";
 import { validateBook } from "../lib/books-core";
 import { validateProductVideo, validateSlideshow } from "../lib/video-core";
 import { AssetError, deleteAsset, getAsset, listAssets, readAssetData, saveAsset, toBase64 } from "./assets";
@@ -20,7 +21,7 @@ import { buildMessages, extractDocumentText, type IncomingMessage } from "./chat
 import { convertAsset, listConversions } from "./convert";
 import { generateImages, ImageError } from "./images";
 import { cancelJob, getJob, listJobs, startJob } from "./jobs";
-import { baseFetch, netFetch, providerFetchImpl } from "./net";
+import { baseFetch, chatFetchImpl, netFetch, providerFetchImpl } from "./net";
 import { createProvider, deleteProvider, loadAllProviders, reorderProviders, updateProvider, validateProviderInput } from "./providers";
 import { shrinkImage } from "./pdf";
 import { canRecordVideo, generateProviderVideo, renderSlideshow, runProductVideo } from "./video";
@@ -70,7 +71,7 @@ async function chatRoute(req: Request): Promise<Response> {
     }
     const built = await buildMessages(msgs);
     try {
-      const { response, provider, attempts } = await routeChat(ordered, built.messages, { autoFallback, signal: req.signal, requireVision: built.hasImages, hasAttachments: built.hasAttachments, fetchImpl: providerFetchImpl });
+      const { response, provider, attempts } = await routeChat(ordered, built.messages, { autoFallback, signal: req.signal, requireVision: built.hasImages, hasAttachments: built.hasAttachments, fetchImpl: chatFetchImpl });
       return new Response(response.body, {
         status: 200,
         headers: {
@@ -95,26 +96,7 @@ async function testRoute(id: string, req: Request): Promise<Response> {
   const wantChat = isRecord(b) && b.chat === true;
   const p = (await loadAllProviders()).providers.find((x) => x.id === id);
   if (!p) return json(404, { error: "Provider not found" });
-  type Step = { name: string; ok: boolean; detail: string };
-  const steps: Step[] = [];
-  const proto = p.protocol ?? "openai";
-  try {
-    const r = await providerFetch(p, "/models", { timeoutMs: Math.min(p.timeoutMs, 30_000), signal: req.signal, fetchImpl: providerFetchImpl });
-    steps.push({ name: "connection", ok: r.ok, detail: r.ok ? "Reached the provider and the credentials were accepted" : r.status === 404 ? "Reachable (this provider has no /models endpoint, which is normal for some gateways)" : describeStatus(r.status) });
-    if (!r.ok && r.status === 404) steps[0].ok = true;
-  } catch (e) {
-    steps.push({ name: "connection", ok: false, detail: `Could not connect: ${redact(describeNetError(e), [p.apiKey])}` });
-  }
-  if (wantChat && p.model && steps[0].ok) {
-    try {
-      const path = proto === "anthropic" ? "/messages" : proto === "gemini" ? `/models/${encodeURIComponent(p.model.replace(/^models\//, ""))}:generateContent` : "/chat/completions";
-      const payload = proto === "anthropic" ? { model: p.model, max_tokens: 5, messages: [{ role: "user", content: "Reply with: ok" }] } : proto === "gemini" ? { contents: [{ role: "user", parts: [{ text: "Reply with: ok" }] }] } : { model: p.model, messages: [{ role: "user", content: "Reply with: ok" }], max_tokens: 5 };
-      const r = await providerFetch(p, path, { method: "POST", body: JSON.stringify(payload), timeoutMs: Math.min(p.timeoutMs, 90_000), signal: req.signal, fetchImpl: providerFetchImpl });
-      steps.push({ name: "chat model", ok: r.ok, detail: r.ok ? `Model "${p.model}" answered` : `${describeStatus(r.status)}${await errorDetail(r, [p.apiKey]).then((d) => (d ? `: ${d}` : ""))}` });
-    } catch (e) {
-      steps.push({ name: "chat model", ok: false, detail: `Could not connect: ${redact(describeNetError(e), [p.apiKey])}` });
-    }
-  }
+  const steps = await testProvider(p, { chat: wantChat, signal: req.signal, fetchImpl: providerFetchImpl });
   return json(200, { ok: steps.every((s) => s.ok), steps });
 }
 
@@ -122,7 +104,9 @@ async function modelsRoute(id: string, req: Request): Promise<Response> {
   const p = (await loadAllProviders()).providers.find((x) => x.id === id);
   if (!p) return json(404, { error: "Provider not found" });
   try {
-    const res = await providerFetch(p, "/models", { timeoutMs: Math.min(p.timeoutMs, 20_000), signal: req.signal, fetchImpl: providerFetchImpl });
+    const mp = modelsPath(p);
+    if (!mp) return json(502, { error: "This provider type has no model list. Enter the model name manually." });
+    const res = await providerFetch(p, mp, { timeoutMs: Math.min(p.timeoutMs, 20_000), signal: req.signal, fetchImpl: providerFetchImpl });
     if (!res.ok) return json(502, { error: `This provider did not list models (HTTP ${res.status}). Enter the model id manually.` });
     const data = (await res.json().catch(() => ({}))) as { data?: unknown[]; models?: unknown[] };
     const raw = (data.data ?? data.models ?? []) as { id?: unknown; name?: unknown }[];

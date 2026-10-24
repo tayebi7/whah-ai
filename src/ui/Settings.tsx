@@ -12,7 +12,7 @@ type Form = {
   id: string;
   preset: string;
   name: string;
-  protocol: "openai" | "anthropic" | "gemini";
+  protocol: "openai" | "anthropic" | "gemini" | "azure" | "ollama" | "cohere";
   baseUrl: string;
   apiKey: string;
   clearKey: boolean;
@@ -135,7 +135,7 @@ export default function Settings() {
       next.model = pick.model;
       if (pick.vision) next.supportsVision = true;
     }
-    if (!next.imageModel.trim() && pick.imageModel && f.protocol !== "anthropic") next.imageModel = pick.imageModel;
+    if (!next.imageModel.trim() && pick.imageModel && (f.protocol === "openai" || f.protocol === "gemini")) next.imageModel = pick.imageModel;
     if (!next.videoModel.trim() && pick.videoModel) next.videoModel = pick.videoModel;
     return { form: next, count: d.models.length };
   }
@@ -373,6 +373,9 @@ export default function Settings() {
                 <option value="openai">OpenAI-compatible</option>
                 <option value="anthropic">Anthropic</option>
                 <option value="gemini">Google Gemini</option>
+                <option value="azure">Azure OpenAI</option>
+                <option value="ollama">Ollama (native)</option>
+                <option value="cohere">Cohere (native)</option>
               </select>
             </Field>
             <Field label={t("fBase")}>

@@ -1,4 +1,4 @@
-import { authHeaders } from "./provider-http";
+import { authHeaders, providerUrl } from "./provider-http";
 import type { Provider } from "./providers";
 
 export type ChatPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
@@ -37,7 +37,7 @@ export function buildChatRequest(p: Provider, messages: ChatMessage[], stream: b
                 return { type: "image", source: { type: "base64", media_type: d.mime, data: d.data } };
               }),
       }));
-    return { url: `${p.baseUrl}/messages`, headers, streamed: true, body: JSON.stringify({ model: p.model, max_tokens: 4096, stream: true, ...(system ? { system } : {}), messages: conv }) };
+    return { url: providerUrl(p, "/messages"), headers, streamed: true, body: JSON.stringify({ model: p.model, max_tokens: 4096, stream: true, ...(system ? { system } : {}), messages: conv }) };
   }
 
   if (protocol === "gemini") {
@@ -58,14 +58,33 @@ export function buildChatRequest(p: Provider, messages: ChatMessage[], stream: b
       }));
     const model = p.model.replace(/^models\//, "");
     return {
-      url: `${p.baseUrl}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,
+      url: providerUrl(p, `/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`),
       headers,
       streamed: true,
       body: JSON.stringify({ contents, ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}) }),
     };
   }
 
-  return { url: `${p.baseUrl}/chat/completions`, headers, streamed: stream, body: JSON.stringify({ model: p.model, messages, stream }) };
+  if (protocol === "ollama") {
+    // Native Ollama API: images travel as bare base64 in an "images" list.
+    const conv = messages.map((m) => {
+      if (typeof m.content === "string") return { role: m.role, content: m.content };
+      const images = m.content.filter((x) => x.type === "image_url").map((x) => parseDataUrl((x as { image_url: { url: string } }).image_url.url)?.data).filter(Boolean);
+      return { role: m.role, content: textOf(m.content), ...(images.length ? { images } : {}) };
+    });
+    return { url: providerUrl(p, "/api/chat"), headers, streamed: true, body: JSON.stringify({ model: p.model, messages: conv, stream: true }) };
+  }
+
+  if (protocol === "cohere") {
+    return { url: providerUrl(p, "/v2/chat"), headers, streamed: true, body: JSON.stringify({ model: p.model, messages, stream: true }) };
+  }
+
+  if (protocol === "azure") {
+    // Azure OpenAI: the model is the deployment named in the URL; the api-version query is added by providerUrl.
+    return { url: providerUrl(p, "/chat/completions"), headers, streamed: stream, body: JSON.stringify({ messages, stream }) };
+  }
+
+  return { url: providerUrl(p, "/chat/completions"), headers, streamed: stream, body: JSON.stringify({ model: p.model, messages, stream }) };
 }
 
 const chunk = (text: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
@@ -73,7 +92,7 @@ const chunk = (text: string) => `data: ${JSON.stringify({ choices: [{ delta: { c
 /** Converts a provider's native stream to OpenAI-style SSE so the UI has a single format. */
 export function normalizeStream(p: Provider, body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const protocol = p.protocol ?? "openai";
-  if (protocol === "openai") return body;
+  if (protocol === "openai" || protocol === "azure") return body;
   const dec = new TextDecoder();
   const enc = new TextEncoder();
   let buf = "";
@@ -85,7 +104,13 @@ export function normalizeStream(p: Provider, body: ReadableStream<Uint8Array>): 
     } catch {
       return;
     }
-    if (protocol === "anthropic") {
+    if (protocol === "ollama") {
+      if (j.error) return fail(new Error(typeof j.error === "string" ? j.error : (j.error.message ?? "provider stream error")));
+      if (typeof j.message?.content === "string" && j.message.content) out(chunk(j.message.content));
+    } else if (protocol === "cohere") {
+      if (j.type === "content-delta" && typeof j.delta?.message?.content?.text === "string") out(chunk(j.delta.message.content.text));
+      else if (j.type === "error" || j.error) fail(new Error(j.error?.message ?? j.message ?? "provider stream error"));
+    } else if (protocol === "anthropic") {
       if (j.type === "content_block_delta" && j.delta?.type === "text_delta" && typeof j.delta.text === "string") out(chunk(j.delta.text));
       else if (j.type === "error") fail(new Error(j.error?.message ?? "provider stream error"));
     } else {
@@ -104,11 +129,13 @@ export function normalizeStream(p: Provider, body: ReadableStream<Uint8Array>): 
         for (const l of lines) {
           const s = l.trim();
           if (s.startsWith("data:")) handle(s.slice(5).trim(), (t) => ctl.enqueue(enc.encode(t)), (e) => ctl.error(e));
+          else if (protocol === "ollama" && s.startsWith("{")) handle(s, (t) => ctl.enqueue(enc.encode(t)), (e) => ctl.error(e));
         }
       },
       flush(ctl) {
         const s = buf.trim();
         if (s.startsWith("data:")) handle(s.slice(5).trim(), (t) => ctl.enqueue(enc.encode(t)), (e) => ctl.error(e));
+        else if (protocol === "ollama" && s.startsWith("{")) handle(s, (t) => ctl.enqueue(enc.encode(t)), (e) => ctl.error(e));
         ctl.enqueue(enc.encode("data: [DONE]\n\n"));
       },
     }),

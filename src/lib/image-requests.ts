@@ -30,7 +30,7 @@ export function buildImageRequest(p: Provider, prompt: string, n = 1, size?: str
     case "openrouter":
       return {
         path: "/chat/completions",
-        body: JSON.stringify({ model: p.imageModel, messages: [{ role: "user", content: prompt }], modalities: ["image", "text"] }),
+        body: JSON.stringify({ model: p.imageModel, messages: [{ role: "user", content: prompt }], modalities: /(flux|sourceful|riverflow|seedream|recraft|ideogram|stable|sdxl)/i.test(p.imageModel) ? ["image"] : ["image", "text"] }),
       };
     default:
       return { path: "/images/generations", body: JSON.stringify({ model: p.imageModel, prompt, n, ...(size && size !== "auto" ? { size } : {}) }) };

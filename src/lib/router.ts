@@ -54,6 +54,12 @@ export function backoffDelay(attempt: number, random: () => number = Math.random
   return Math.floor(exp * (0.5 + random() * 0.5)); // jitter: 50%-100% of exp
 }
 
+/** Safe description of the stored key so the user can compare it with the one in their account (never the whole key). */
+export function keyFingerprint(key: string): string {
+  if (!key) return "no key saved";
+  return key.length <= 10 ? `key of ${key.length} characters` : `key ${key.slice(0, 5)}…${key.slice(-4)}, ${key.length} characters`;
+}
+
 export function describeStatus(status: number): string {
   if (status === 401 || status === 403) return `invalid credentials (HTTP ${status})`;
   if (status === 404) return `model or endpoint not found (HTTP ${status})`;
@@ -153,7 +159,9 @@ export async function routeChat(providers: Provider[], messages: ChatMessage[], 
           attempts.push({ providerId: provider.id, reason: "timed out (not retried to avoid duplicate paid requests)" });
           break;
         }
-        if (n < provider.maxRetries) {
+        // A name that does not resolve (or a TLS failure) will not fix itself in a few seconds: don't wait, move on.
+        const permanent = /unable to resolve host|unknownhost|enotfound|err_name_not_resolved|certificate|cleartext/i.test(String((netErr as Error)?.message ?? netErr));
+        if (n < provider.maxRetries && !permanent) {
           await sleep(backoffDelay(n, opts.random)); // connection error before any response: safe to retry
           continue;
         }
@@ -177,7 +185,7 @@ export async function routeChat(providers: Provider[], messages: ChatMessage[], 
         await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, BACKOFF_CAP_MS) : backoffDelay(n, opts.random));
         continue;
       }
-      attempts.push({ providerId: provider.id, reason: `${describeStatus(status)}${detail ? `: ${detail}` : ""}` });
+      attempts.push({ providerId: provider.id, reason: `${describeStatus(status)}${detail ? `: ${detail}` : ""}${status === 401 || status === 403 ? ` [${keyFingerprint(provider.apiKey)}]` : ""}` });
       break;
     }
   }

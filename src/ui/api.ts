@@ -8,7 +8,7 @@ export type VideoApiPublic = { submitPath: string; statusPath: string; idField: 
 export type PubProvider = {
   id: string;
   name: string;
-  protocol?: "openai" | "anthropic" | "gemini";
+  protocol?: "openai" | "anthropic" | "gemini" | "azure" | "ollama" | "cohere";
   baseUrl: string;
   model: string;
   imageModel: string;

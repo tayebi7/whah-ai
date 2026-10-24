@@ -80,3 +80,43 @@ describe("model suggestion", () => {
     assert.equal(bestOf(["gpt-4o-mini", "gpt-4o"]), "gpt-4o-mini");
   });
 });
+
+import { buildChatRequest, normalizeStream } from "../src/lib/adapters";
+import { cleanKey, validateProviderInput } from "../src/lib/providers-core";
+import { providerUrl, authHeaders } from "../src/lib/provider-http";
+import { keyFingerprint } from "../src/lib/router";
+
+describe("more protocols and key hygiene", () => {
+  it("cleans keys pasted with invisible marks and rejects non-ASCII", () => {
+    assert.equal(cleanKey(" ‏sk-or-v1-abc‎\n"), "sk-or-v1-abc");
+    assert.equal(cleanKey("Bearer sk-x1"), "sk-x1");
+    assert.equal(validateProviderInput({ name: "a", baseUrl: "https://a.example.com", apiKey: "‏ sk-or-v1-abc ", model: "m" }, { local: false }).value?.apiKey, "sk-or-v1-abc");
+    assert.ok(validateProviderInput({ name: "a", baseUrl: "https://a.example.com", apiKey: "مفتاح" }, { local: false }).errors.some((e) => /apiKey/.test(e)));
+  });
+  it("fingerprint never reveals the whole key", () => {
+    const f = keyFingerprint("sk-or-v1-0123456789abcdef");
+    assert.ok(f.includes("sk-or") && f.includes("cdef") && !f.includes("0123456789"));
+  });
+  it("azure: api-key header, deployment URL keeps api-version", () => {
+    const p = mk({ protocol: "azure", baseUrl: "https://r.openai.azure.com/openai/deployments/d1", apiKey: "k" });
+    assert.equal(providerUrl(p, "/chat/completions"), "https://r.openai.azure.com/openai/deployments/d1/chat/completions?api-version=2024-10-21");
+    assert.equal(providerUrl({ ...p, baseUrl: `${p.baseUrl}?api-version=2025-01-01` }, "/chat/completions"), "https://r.openai.azure.com/openai/deployments/d1/chat/completions?api-version=2025-01-01");
+    assert.equal(authHeaders(p)["api-key"], "k");
+    assert.ok(!("model" in JSON.parse(buildChatRequest(p, [{ role: "user", content: "hi" }], true).body)));
+  });
+  it("ollama native: /api/chat, images as bare base64, NDJSON stream converted", async () => {
+    const p = mk({ protocol: "ollama", baseUrl: "http://h:11434", model: "llava" });
+    const r = buildChatRequest(p, [{ role: "user", content: [{ type: "text", text: "see" }, { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" } }] }], true);
+    assert.equal(r.url, "http://h:11434/api/chat");
+    assert.deepEqual(JSON.parse(r.body).messages[0].images, ["QUJD"]);
+    const src = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode('{"message":{"content":"Hel"}}\n{"message":{"content":"lo"},"done":true}\n')); c.close(); } });
+    const text = await new Response(normalizeStream(p, src)).text();
+    assert.ok(text.includes('"Hel"') && text.includes('"lo"') && text.includes("[DONE]"));
+  });
+  it("cohere v2: endpoint and content-delta events", async () => {
+    const p = mk({ protocol: "cohere", baseUrl: "https://api.cohere.com", model: "command-a" });
+    assert.equal(buildChatRequest(p, [{ role: "user", content: "hi" }], true).url, "https://api.cohere.com/v2/chat");
+    const src = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new TextEncoder().encode('event: content-delta\ndata: {"type":"content-delta","delta":{"message":{"content":{"text":"Salam"}}}}\n\n')); c.close(); } });
+    assert.ok((await new Response(normalizeStream(p, src)).text()).includes("Salam"));
+  });
+});

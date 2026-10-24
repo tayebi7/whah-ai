@@ -1,7 +1,7 @@
 import { assertSafeUrl } from "./ssrf";
 
 /** Pure provider logic (types, validation, defaults). No Node APIs: also used by the on-device (Android) app. */
-export const PROTOCOLS = ["openai", "anthropic", "gemini"] as const;
+export const PROTOCOLS = ["openai", "anthropic", "gemini", "azure", "ollama", "cohere"] as const;
 export type Protocol = (typeof PROTOCOLS)[number];
 
 /** How to talk to a provider's asynchronous video API. There is no standard, so every path/field is configurable. */
@@ -42,11 +42,19 @@ export type Provider = {
   source?: "env" | "stored";
 };
 
+/** Removes spaces, line breaks, invisible direction marks (common when pasting with an Arabic keyboard), quotes and a leading "Bearer". */
+export function cleanKey(raw: string): string {
+  return raw
+    .replace(/[\s\u00a0\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]+/g, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/^bearer/i, "");
+}
+
 export type Capabilities = { chat: boolean; vision: boolean; image: boolean; video: boolean };
 export const capabilitiesOf = (p: Provider): Capabilities => ({
   chat: !!p.model,
   vision: !!p.model && p.supportsVision,
-  image: !!p.imageModel && (p.protocol ?? "openai") !== "anthropic",
+  image: !!p.imageModel && ["openai", "gemini"].includes(p.protocol ?? "openai"),
   video: !!p.videoModel && (!!p.videoApi || p.protocol === "gemini"),
 });
 
@@ -201,7 +209,12 @@ export function validateProviderInput(input: unknown, opts: { allowLocal?: boole
     }
   }
 
-  set("apiKey", str("apiKey", { max: 2000, re: /^\S+$/, msg: "must not contain spaces or line breaks", trim: false }));
+  if (typeof input.apiKey === "string") {
+    const cleaned = cleanKey(input.apiKey);
+    if (cleaned && !/^[\x21-\x7e]+$/.test(cleaned)) errors.push("apiKey: must contain only English letters, digits and symbols (check that the keyboard is not set to Arabic)");
+    else if (cleaned.length > 2000) errors.push("apiKey: must be at most 2000 characters");
+    else value.apiKey = cleaned;
+  } else if (input.apiKey !== undefined && input.apiKey !== null) errors.push("apiKey: must be text");
   set("clearKey", bool("clearKey"));
   for (const k of ["model", "imageModel", "videoModel"] as const) set(k, str(k, { max: 200, re: /^[^\x00-\x1f]+$/, msg: "contains invalid characters" }));
   set("orgId", str("orgId", { max: 100, re: /^[A-Za-z0-9_.:-]+$/, msg: "contains invalid characters" }));

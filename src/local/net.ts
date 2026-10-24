@@ -81,3 +81,19 @@ export async function netFetch(input: RequestInfo | URL, init: RequestInit = {},
 
 /** A fetch usable by the router / image / video code: provider calls use the native client when available. */
 export const providerFetchImpl: typeof fetch = (input, init) => netFetch(input, init);
+
+/**
+ * fetch for CHAT. The WebView's own fetch delivers the answer as it is generated (the native HTTP plugin only
+ * returns when the whole reply is ready, which feels slow). If the WebView blocks the request (provider without
+ * CORS, plain http, ...) it falls back to native HTTP. The preflight protects us from double sending: a blocked
+ * POST is never transmitted.
+ */
+export const chatFetchImpl: typeof fetch = async (input, init) => {
+  if (!nativeHttp()) return baseFetch(input, init);
+  try {
+    return await baseFetch(input, init);
+  } catch (e) {
+    if (init?.signal?.aborted) throw e;
+    return netFetch(input, init);
+  }
+};
